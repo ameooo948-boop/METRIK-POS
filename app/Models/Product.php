@@ -15,17 +15,8 @@ class Product extends Model
     use HasFactory, SoftDeletes;
 
     protected $fillable = [
-        'organization_id',
-        'category_id',
-        'base_unit_id',
-        'created_by',
-        'sku',
-        'name',
-        'description',
-        'purchase_price',
-        'selling_price',
-        'low_stock_threshold',
-        'is_active',
+        'organization_id', 'category_id', 'base_unit_id', 'created_by', 'sku', 'name', 'description',
+        'purchase_price', 'selling_price', 'low_stock_threshold', 'is_active',
     ];
 
     protected function casts(): array
@@ -40,16 +31,12 @@ class Product extends Model
 
     protected function sku(): Attribute
     {
-        return Attribute::make(
-            set: static fn (string $value): string => mb_strtoupper(trim($value)),
-        );
+        return Attribute::make(set: static fn (string $value): string => mb_strtoupper(trim($value)));
     }
 
     protected function name(): Attribute
     {
-        return Attribute::make(
-            set: static fn (string $value): string => trim($value),
-        );
+        return Attribute::make(set: static fn (string $value): string => trim($value));
     }
 
     public function organization(): BelongsTo
@@ -87,6 +74,11 @@ class Product extends Model
         return $this->hasMany(InventoryMovement::class);
     }
 
+    public function purchaseInvoiceItems(): HasMany
+    {
+        return $this->hasMany(PurchaseInvoiceItem::class);
+    }
+
     public function scopeForOrganization(Builder $query, int $organizationId): Builder
     {
         return $query->where('organization_id', $organizationId);
@@ -100,7 +92,6 @@ class Product extends Model
     public function scopeSearch(Builder $query, ?string $search): Builder
     {
         $search = trim((string) $search);
-
         if ($search === '') {
             return $query;
         }

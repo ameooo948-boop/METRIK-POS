@@ -12,15 +12,7 @@ class Branch extends Model
 {
     use HasFactory;
 
-    protected $fillable = [
-        'organization_id',
-        'name',
-        'code',
-        'phone',
-        'address',
-        'is_main',
-        'status',
-    ];
+    protected $fillable = ['organization_id', 'name', 'code', 'phone', 'address', 'is_main', 'status'];
 
     protected function casts(): array
     {
@@ -45,5 +37,15 @@ class Branch extends Model
     public function inventoryMovements(): HasMany
     {
         return $this->hasMany(InventoryMovement::class);
+    }
+
+    public function purchaseInvoices(): HasMany
+    {
+        return $this->hasMany(PurchaseInvoice::class);
+    }
+
+    public function supplierTransactions(): HasMany
+    {
+        return $this->hasMany(SupplierTransaction::class);
     }
 }

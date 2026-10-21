@@ -42,6 +42,22 @@ class OrganizationPolicy
             && OrganizationRole::tryFrom($role)?->canManageInventory() === true;
     }
 
+    public function viewPurchases(User $user, Organization $organization): bool
+    {
+        $role = $this->roleFor($user, $organization);
+
+        return $role !== null
+            && OrganizationRole::tryFrom($role)?->canViewPurchases() === true;
+    }
+
+    public function managePurchases(User $user, Organization $organization): bool
+    {
+        $role = $this->roleFor($user, $organization);
+
+        return $role !== null
+            && OrganizationRole::tryFrom($role)?->canManagePurchases() === true;
+    }
+
     private function roleFor(User $user, Organization $organization): ?string
     {
         $membership = $user->organizations()

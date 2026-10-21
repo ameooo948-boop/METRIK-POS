@@ -11,14 +11,7 @@ class Organization extends Model
 {
     use HasFactory;
 
-    protected $fillable = [
-        'name',
-        'slug',
-        'status',
-        'timezone',
-        'currency',
-        'settings',
-    ];
+    protected $fillable = ['name', 'slug', 'status', 'timezone', 'currency', 'settings'];
 
     protected function casts(): array
     {
@@ -55,5 +48,15 @@ class Organization extends Model
     public function inventoryMovements(): HasMany
     {
         return $this->hasMany(InventoryMovement::class);
+    }
+
+    public function suppliers(): HasMany
+    {
+        return $this->hasMany(Supplier::class);
+    }
+
+    public function purchaseInvoices(): HasMany
+    {
+        return $this->hasMany(PurchaseInvoice::class);
     }
 }

@@ -43,4 +43,20 @@ enum OrganizationRole: string
     {
         return in_array($this, [self::OWNER, self::ADMIN, self::BRANCH_MANAGER, self::INVENTORY_MANAGER], true);
     }
+
+    public function canViewPurchases(): bool
+    {
+        return in_array($this, [
+            self::OWNER,
+            self::ADMIN,
+            self::BRANCH_MANAGER,
+            self::INVENTORY_MANAGER,
+            self::ACCOUNTANT,
+        ], true);
+    }
+
+    public function canManagePurchases(): bool
+    {
+        return $this->canViewPurchases();
+    }
 }
