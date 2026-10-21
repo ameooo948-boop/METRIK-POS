@@ -1,0 +1,36 @@
+<?php
+
+namespace App\Enums;
+
+enum OrganizationRole: string
+{
+    case OWNER = 'owner';
+    case ADMIN = 'admin';
+    case BRANCH_MANAGER = 'branch_manager';
+    case CASHIER = 'cashier';
+    case INVENTORY_MANAGER = 'inventory_manager';
+    case ACCOUNTANT = 'accountant';
+
+    /** @return list<string> */
+    public static function values(): array
+    {
+        return array_map(static fn (self $role): string => $role->value, self::cases());
+    }
+
+    public function label(): string
+    {
+        return match ($this) {
+            self::OWNER => 'مالك المؤسسة',
+            self::ADMIN => 'مدير المؤسسة',
+            self::BRANCH_MANAGER => 'مدير فرع',
+            self::CASHIER => 'كاشير',
+            self::INVENTORY_MANAGER => 'مسؤول المخزون',
+            self::ACCOUNTANT => 'محاسب',
+        };
+    }
+
+    public function canManageBranches(): bool
+    {
+        return in_array($this, [self::OWNER, self::ADMIN], true);
+    }
+}
