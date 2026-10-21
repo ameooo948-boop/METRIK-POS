@@ -3,6 +3,7 @@
 namespace App\Notifications;
 
 use Illuminate\Bus\Queueable;
+use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Notification;
 
 class ReportExportReady extends Notification
@@ -19,7 +20,26 @@ class ReportExportReady extends Notification
     /** @return list<string> */
     public function via(object $notifiable): array
     {
-        return ['database'];
+        $channels = ['database'];
+
+        if (config('metrik.notifications.report_export_email_enabled', false)
+            && filled($notifiable->routeNotificationFor('mail', $this))) {
+            $channels[] = 'mail';
+        }
+
+        return $channels;
+    }
+
+    public function toMail(object $notifiable): MailMessage
+    {
+        $greetingName = filled($notifiable->name ?? null) ? (string) $notifiable->name : 'بك';
+
+        return (new MailMessage)
+            ->subject('تقرير Metrik POS جاهز للتنزيل')
+            ->greeting('مرحبًا '.$greetingName)
+            ->line(sprintf('تم تجهيز تقرير المبيعات للفترة من %s إلى %s.', $this->fromDate, $this->toDate))
+            ->action('تنزيل التقرير', $this->downloadUrl)
+            ->line('احتفظ بهذه الرسالة للرجوع إلى رابط التقرير عند الحاجة.');
     }
 
     /** @return array<string, mixed> */

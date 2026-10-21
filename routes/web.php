@@ -9,6 +9,7 @@ use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\Expenses\ExpenseController;
 use App\Http\Controllers\Reports\ReportController;
 use App\Http\Controllers\Reports\ReportExportController;
+use App\Http\Controllers\Notifications\NotificationController;
 use App\Http\Controllers\Inventory\InventoryAdjustmentController;
 use App\Http\Controllers\Organizations\OrganizationSetupController;
 use App\Http\Controllers\Organizations\SwitchOrganizationController;
@@ -20,6 +21,7 @@ use App\Http\Controllers\Sales\SaleController;
 use App\Http\Controllers\Purchasing\PurchaseInvoiceController;
 use App\Http\Controllers\Suppliers\SupplierController;
 use App\Http\Middleware\ResolveOrganizationContext;
+use App\Http\Middleware\RequestLogContext;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
@@ -40,8 +42,12 @@ Route::middleware('auth')->group(function () {
     Route::post('/organizations/{organization}/switch', SwitchOrganizationController::class)->name('organizations.switch');
     Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])->name('logout');
 
-    Route::middleware(ResolveOrganizationContext::class)->group(function () {
+    Route::middleware([ResolveOrganizationContext::class, RequestLogContext::class])->group(function () {
         Route::get('/dashboard', DashboardController::class)->name('dashboard');
+
+        Route::get('/notifications', [NotificationController::class, 'index'])->name('notifications.index');
+        Route::post('/notifications/read-all', [NotificationController::class, 'markAllRead'])->name('notifications.readAll');
+        Route::post('/notifications/{notificationId}/read', [NotificationController::class, 'markRead'])->name('notifications.read');
 
         Route::get('/branches', [BranchController::class, 'index'])->name('branches.index');
         Route::post('/branches', [BranchController::class, 'store'])->middleware('throttle:30,1')->name('branches.store');
