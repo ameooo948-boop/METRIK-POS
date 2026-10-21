@@ -40,6 +40,10 @@ class PointOfSaleController extends Controller
             ->forOrganization((int) $organization->getKey())
             ->where('branch_id', $branch->getKey())
             ->when($role === OrganizationRole::CASHIER, fn ($query) => $query->where('cashier_id', $userId))
+            ->select([
+                'id', 'organization_id', 'branch_id', 'cashier_id',
+                'invoice_number', 'total', 'sold_at',
+            ])
             ->with('cashier:id,name')
             ->latest('id')
             ->limit(8)

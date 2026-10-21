@@ -26,6 +26,10 @@ class SaleController extends Controller
             ->forOrganization((int) $organization->getKey())
             ->where('branch_id', $branch->getKey())
             ->when($role === OrganizationRole::CASHIER, fn ($query) => $query->where('cashier_id', $request->user()->getKey()))
+            ->select([
+                'id', 'organization_id', 'branch_id', 'cashier_id',
+                'invoice_number', 'total', 'status', 'sold_at',
+            ])
             ->with('cashier:id,name')
             ->latest('id')
             ->paginate(20)

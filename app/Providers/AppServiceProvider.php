@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -16,6 +17,9 @@ class AppServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        // Catch accidental N+1 queries during local development without changing production behavior.
+        Model::preventLazyLoading((bool) config('metrik.performance.prevent_lazy_loading', false));
+
         if (! config('metrik.performance.slow_query_logging_enabled', false)) {
             return;
         }

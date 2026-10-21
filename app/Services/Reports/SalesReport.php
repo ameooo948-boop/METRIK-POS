@@ -23,7 +23,9 @@ class SalesReport
 
         $key = app(ReportCacheVersion::class)->cacheKey($organizationId, $branchIds, $fromDate, $toDate);
 
-        return Cache::remember($key, 45, fn (): array => $this->calculate(
+        $ttlSeconds = max(1, (int) config('metrik.performance.report_cache_ttl_seconds', 45));
+
+        return Cache::remember($key, $ttlSeconds, fn (): array => $this->calculate(
             $organizationId,
             $branchIds,
             $fromDate,
