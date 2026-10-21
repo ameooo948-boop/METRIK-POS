@@ -59,4 +59,15 @@ enum OrganizationRole: string
     {
         return $this->canViewPurchases();
     }
+
+
+    public function canUsePos(): bool
+    {
+        return in_array($this, [self::OWNER, self::ADMIN, self::BRANCH_MANAGER, self::CASHIER], true);
+    }
+
+    public function canViewSales(): bool
+    {
+        return in_array($this, [self::OWNER, self::ADMIN, self::BRANCH_MANAGER, self::CASHIER, self::ACCOUNTANT], true);
+    }
 }

@@ -1,0 +1,287 @@
+<?php
+
+namespace App\Services\POS;
+
+use App\Data\POS\CreateSaleData;
+use App\Models\Branch;
+use App\Models\CashMovement;
+use App\Models\CashShift;
+use App\Models\InventoryBalance;
+use App\Models\InventoryMovement;
+use App\Models\Product;
+use App\Models\Sale;
+use App\Models\SaleItem;
+use App\Models\SalePayment;
+use App\Support\DecimalMoney;
+use App\Support\DecimalQuantity;
+use Illuminate\Database\QueryException;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
+
+class CheckoutSale
+{
+    public function handle(CreateSaleData $data): Sale
+    {
+        try {
+            return DB::transaction(function () use ($data): Sale {
+                $existing = $this->existingSale($data, lock: true);
+                if ($existing) {
+                    return $existing->load(['items', 'payments', 'branch', 'cashier']);
+                }
+
+                $branch = Branch::query()
+                    ->where('organization_id', $data->organizationId)
+                    ->whereKey($data->branchId)
+                    ->where('status', 'active')
+                    ->firstOrFail();
+
+                $shift = CashShift::query()
+                    ->where('organization_id', $data->organizationId)
+                    ->where('branch_id', $branch->getKey())
+                    ->where('cashier_id', $data->cashierId)
+                    ->where('status', 'open')
+                    ->lockForUpdate()
+                    ->first();
+
+                if (! $shift) {
+                    throw ValidationException::withMessages([
+                        'items' => 'افتح وردية كاشير قبل تسجيل أي عملية بيع.',
+                    ]);
+                }
+
+                // Recheck the idempotency key after locking the shift. A retry may have
+                // waited for the first request to commit while waiting on this row lock.
+                $existing = $this->existingSale($data, lock: true);
+                if ($existing) {
+                    return $existing->load(['items', 'payments', 'branch', 'cashier']);
+                }
+
+                $productIds = array_values(array_unique(array_map(
+                    static fn (array $item): int => (int) $item['product_id'],
+                    $data->items,
+                )));
+                sort($productIds, SORT_NUMERIC);
+
+                // Lock products in a stable order. Purchases and inventory adjustments
+                // lock the same rows before changing balances, preventing overselling.
+                $products = Product::query()
+                    ->forOrganization($data->organizationId)
+                    ->active()
+                    ->whereIn('id', $productIds)
+                    ->orderBy('id')
+                    ->with('baseUnit:id,name_ar,name_en')
+                    ->lockForUpdate()
+                    ->get()
+                    ->keyBy(static fn (Product $product): int => (int) $product->getKey());
+
+                if ($products->count() !== count($productIds)) {
+                    throw ValidationException::withMessages([
+                        'items' => 'يوجد منتج غير نشط أو لا يتبع المؤسسة الحالية. حدّث السلة وحاول مرة أخرى.',
+                    ]);
+                }
+
+                // Final idempotency check after the product locks also serializes duplicate
+                // submissions whose carts happen to overlap.
+                $existing = $this->existingSale($data, lock: true);
+                if ($existing) {
+                    return $existing->load(['items', 'payments', 'branch', 'cashier']);
+                }
+
+                $preparedItems = [];
+                $subtotalCents = 0;
+                $balances = [];
+
+                foreach ($data->items as $index => $item) {
+                    /** @var Product $product */
+                    $product = $products->get((int) $item['product_id']);
+                    $quantityMilli = DecimalQuantity::toMilli((string) $item['quantity']);
+                    $unitPriceCents = DecimalMoney::toCents((string) $product->selling_price);
+                    $unitCostCents = DecimalMoney::toCents((string) $product->purchase_price);
+                    if ($unitPriceCents < 0 || $unitPriceCents > 999_999_999 || $unitCostCents < 0 || $unitCostCents > 999_999_999) {
+                        throw ValidationException::withMessages([
+                            'items.'.$index.'.product_id' => 'سعر المنتج أو تكلفته خارج النطاق المسموح به. راجع بيانات المنتج.',
+                        ]);
+                    }
+                    $lineTotalCents = intdiv(($quantityMilli * $unitPriceCents) + 500, 1000);
+
+                    $balance = InventoryBalance::query()
+                        ->where('organization_id', $data->organizationId)
+                        ->where('branch_id', $branch->getKey())
+                        ->where('product_id', $product->getKey())
+                        ->lockForUpdate()
+                        ->first();
+
+                    $currentMilli = $balance ? DecimalQuantity::toMilli((string) $balance->quantity) : 0;
+                    if ($quantityMilli > $currentMilli) {
+                        throw ValidationException::withMessages([
+                            'items.'.$index.'.quantity' => 'الكمية المطلوبة من «'.$product->name.'» أكبر من رصيد الفرع الحالي ('.DecimalQuantity::fromMilli($currentMilli).').',
+                        ]);
+                    }
+
+                    $newMilli = $currentMilli - $quantityMilli;
+                    $balances[(int) $product->getKey()] = ['model' => $balance, 'new_milli' => $newMilli];
+                    $subtotalCents += $lineTotalCents;
+                    $preparedItems[] = [
+                        'product' => $product,
+                        'quantity_milli' => $quantityMilli,
+                        'unit_price_cents' => $unitPriceCents,
+                        'unit_cost_cents' => $unitCostCents,
+                        'line_total_cents' => $lineTotalCents,
+                    ];
+                }
+
+                if ($subtotalCents <= 0 || $subtotalCents > 99_999_999_999_999) {
+                    throw ValidationException::withMessages([
+                        'items' => 'إجمالي البيع غير صالح أو أكبر من الحد المسموح به.',
+                    ]);
+                }
+
+                $sale = Sale::query()->create([
+                    'organization_id' => $data->organizationId,
+                    'branch_id' => $branch->getKey(),
+                    'cash_shift_id' => $shift->getKey(),
+                    'cashier_id' => $data->cashierId,
+                    'invoice_number' => 'POS-'.now()->format('Ymd').'-'.Str::upper((string) Str::ulid()),
+                    'client_operation_uuid' => $data->clientOperationUuid,
+                    'status' => 'paid',
+                    'subtotal' => DecimalMoney::fromCents($subtotalCents),
+                    'discount_total' => '0.00',
+                    'tax_total' => '0.00',
+                    'total' => DecimalMoney::fromCents($subtotalCents),
+                    'notes' => $data->notes,
+                    'sold_at' => now(),
+                ]);
+
+                foreach ($preparedItems as $item) {
+                    /** @var Product $product */
+                    $product = $item['product'];
+                    $quantity = DecimalQuantity::fromMilli($item['quantity_milli']);
+                    $lineTotal = DecimalMoney::fromCents($item['line_total_cents']);
+                    $unitPrice = DecimalMoney::fromCents($item['unit_price_cents']);
+                    $unitCost = DecimalMoney::fromCents($item['unit_cost_cents']);
+
+                    SaleItem::query()->create([
+                        'organization_id' => $data->organizationId,
+                        'sale_id' => $sale->getKey(),
+                        'product_id' => $product->getKey(),
+                        'product_sku_snapshot' => $product->sku,
+                        'product_name_snapshot' => $product->name,
+                        'unit_name_snapshot' => $product->baseUnit?->name_ar ?? $product->baseUnit?->name_en ?? 'وحدة أساسية',
+                        'quantity' => $quantity,
+                        'unit_price' => $unitPrice,
+                        'unit_cost_snapshot' => $unitCost,
+                        'discount_amount' => '0.00',
+                        'tax_amount' => '0.00',
+                        'line_total' => $lineTotal,
+                    ]);
+
+                    $newMilli = $balances[(int) $product->getKey()]['new_milli'];
+                    /** @var InventoryBalance|null $balance */
+                    $balance = $balances[(int) $product->getKey()]['model'];
+                    if ($balance) {
+                        $balance->quantity = DecimalQuantity::fromMilli($newMilli);
+                        $balance->save();
+                    } else {
+                        // A positive stock quantity cannot be sold if no balance exists, so
+                        // this branch is only defensive and would still create the zero row.
+                        $balance = InventoryBalance::query()->create([
+                            'organization_id' => $data->organizationId,
+                            'branch_id' => $branch->getKey(),
+                            'product_id' => $product->getKey(),
+                            'quantity' => DecimalQuantity::fromMilli($newMilli),
+                        ]);
+                    }
+
+                    InventoryMovement::query()->create([
+                        'organization_id' => $data->organizationId,
+                        'branch_id' => $branch->getKey(),
+                        'product_id' => $product->getKey(),
+                        'created_by' => $data->cashierId,
+                        'movement_type' => 'sale',
+                        'quantity_delta' => DecimalQuantity::fromMilli(-$item['quantity_milli']),
+                        'balance_after' => DecimalQuantity::fromMilli($newMilli),
+                        'source' => 'pos',
+                        'reason' => 'بيع نقطة البيع '.$sale->invoice_number,
+                        'reference_type' => Sale::class,
+                        'reference_id' => $sale->getKey(),
+                    ]);
+                }
+
+                $total = DecimalMoney::fromCents($subtotalCents);
+                SalePayment::query()->create([
+                    'organization_id' => $data->organizationId,
+                    'sale_id' => $sale->getKey(),
+                    'payment_method' => $data->paymentMethod,
+                    'amount' => $total,
+                ]);
+
+                if ($data->paymentMethod === 'cash') {
+                    CashMovement::query()->create([
+                        'organization_id' => $data->organizationId,
+                        'branch_id' => $branch->getKey(),
+                        'cash_shift_id' => $shift->getKey(),
+                        'sale_id' => $sale->getKey(),
+                        'created_by' => $data->cashierId,
+                        'movement_type' => 'cash_sale',
+                        'amount' => $total,
+                        'notes' => 'تحصيل نقدي للفاتورة '.$sale->invoice_number,
+                    ]);
+                }
+
+                return $sale->load(['items', 'payments', 'branch', 'cashier']);
+            }, attempts: 3);
+        } catch (QueryException $exception) {
+            // Concurrent duplicate submissions may race on the database unique key.
+            $existing = $this->existingSale($data, lock: false);
+            if ($existing) {
+                return $existing->load(['items', 'payments', 'branch', 'cashier']);
+            }
+
+            throw $exception;
+        }
+    }
+
+    private function existingSale(CreateSaleData $data, bool $lock = false): ?Sale
+    {
+        $query = Sale::query()
+            ->where('organization_id', $data->organizationId)
+            ->where('client_operation_uuid', $data->clientOperationUuid);
+
+        if ($lock) {
+            $query->lockForUpdate();
+        }
+
+        $existing = $query->with(['items', 'payments'])->first();
+        if (! $existing) {
+            return null;
+        }
+
+        if ((int) $existing->branch_id !== $data->branchId || (int) $existing->cashier_id !== $data->cashierId) {
+            throw ValidationException::withMessages([
+                'client_operation_uuid' => 'معرّف عملية البيع مستخدم لعملية أخرى. أعد المحاولة بعملية جديدة.',
+            ]);
+        }
+
+        $requestedItems = [];
+        foreach ($data->items as $item) {
+            $requestedItems[(int) $item['product_id']] = DecimalQuantity::toMilli((string) $item['quantity']);
+        }
+        ksort($requestedItems, SORT_NUMERIC);
+
+        $savedItems = [];
+        foreach ($existing->items as $item) {
+            $savedItems[(int) $item->product_id] = DecimalQuantity::toMilli((string) $item->quantity);
+        }
+        ksort($savedItems, SORT_NUMERIC);
+
+        $savedPaymentMethod = $existing->payments->first()?->payment_method;
+        if ($requestedItems !== $savedItems || $savedPaymentMethod !== $data->paymentMethod) {
+            throw ValidationException::withMessages([
+                'client_operation_uuid' => 'تم استخدام معرّف العملية سابقًا مع سلة أو طريقة دفع مختلفة. أعد المحاولة بمعرّف جديد.',
+            ]);
+        }
+
+        return $existing;
+    }
+}
