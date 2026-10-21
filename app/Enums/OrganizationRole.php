@@ -70,4 +70,14 @@ enum OrganizationRole: string
     {
         return in_array($this, [self::OWNER, self::ADMIN, self::BRANCH_MANAGER, self::CASHIER, self::ACCOUNTANT], true);
     }
+
+    public function canViewReports(): bool
+    {
+        return in_array($this, [self::OWNER, self::ADMIN, self::BRANCH_MANAGER, self::ACCOUNTANT], true);
+    }
+
+    public function canManageExpenses(): bool
+    {
+        return in_array($this, [self::OWNER, self::ADMIN, self::BRANCH_MANAGER, self::ACCOUNTANT], true);
+    }
 }

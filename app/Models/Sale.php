@@ -14,7 +14,7 @@ class Sale extends Model
 
     protected $fillable = [
         'organization_id', 'branch_id', 'cash_shift_id', 'cashier_id', 'invoice_number',
-        'client_operation_uuid', 'status', 'subtotal', 'discount_total', 'tax_total', 'total', 'notes', 'sold_at',
+        'client_operation_uuid', 'status', 'subtotal', 'discount_total', 'tax_total', 'total', 'notes', 'sold_at', 'offline_created_at', 'offline_sync_received_at',
     ];
 
     protected function casts(): array
@@ -22,6 +22,7 @@ class Sale extends Model
         return [
             'subtotal' => 'decimal:2', 'discount_total' => 'decimal:2', 'tax_total' => 'decimal:2',
             'total' => 'decimal:2', 'sold_at' => 'datetime',
+            'offline_created_at' => 'datetime', 'offline_sync_received_at' => 'datetime',
         ];
     }
 

@@ -6,11 +6,14 @@ use App\Http\Controllers\Branches\BranchController;
 use App\Http\Controllers\Catalog\CategoryController;
 use App\Http\Controllers\Catalog\ProductController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\Expenses\ExpenseController;
+use App\Http\Controllers\Reports\ReportController;
 use App\Http\Controllers\Inventory\InventoryAdjustmentController;
 use App\Http\Controllers\Organizations\OrganizationSetupController;
 use App\Http\Controllers\Organizations\SwitchOrganizationController;
 use App\Http\Controllers\POS\CashShiftController;
 use App\Http\Controllers\POS\PointOfSaleController;
+use App\Http\Controllers\POS\OfflineSaleSyncController;
 use App\Http\Controllers\POS\SaleCheckoutController;
 use App\Http\Controllers\Sales\SaleController;
 use App\Http\Controllers\Purchasing\PurchaseInvoiceController;
@@ -55,10 +58,17 @@ Route::middleware('auth')->group(function () {
 
         Route::get('/pos', [PointOfSaleController::class, 'index'])->name('pos.index');
         Route::get('/pos/products/search', [PointOfSaleController::class, 'searchProducts'])->middleware('throttle:120,1')->name('pos.products.search');
+        Route::get('/pos/offline/catalog', [PointOfSaleController::class, 'offlineCatalog'])->middleware('throttle:30,1')->name('pos.offline.catalog');
+        Route::post('/pos/offline/sync', OfflineSaleSyncController::class)->middleware('throttle:60,1')->name('pos.offline.sync');
         Route::post('/pos/shifts', [CashShiftController::class, 'open'])->middleware('throttle:20,1')->name('pos.shifts.open');
         Route::post('/pos/shifts/{shiftId}/close', [CashShiftController::class, 'close'])->whereNumber('shiftId')->middleware('throttle:20,1')->name('pos.shifts.close');
         Route::post('/pos/checkout', [SaleCheckoutController::class, 'store'])->middleware('throttle:60,1')->name('pos.checkout');
         Route::get('/sales', [SaleController::class, 'index'])->name('sales.index');
         Route::get('/sales/{saleId}', [SaleController::class, 'show'])->whereNumber('saleId')->name('sales.show');
+
+        Route::get('/reports', [ReportController::class, 'index'])->name('reports.index');
+        Route::get('/reports/export', [ReportController::class, 'export'])->middleware('throttle:30,1')->name('reports.export');
+        Route::get('/expenses', [ExpenseController::class, 'index'])->name('expenses.index');
+        Route::post('/expenses', [ExpenseController::class, 'store'])->middleware('throttle:30,1')->name('expenses.store');
     });
 });

@@ -74,6 +74,22 @@ class OrganizationPolicy
             && OrganizationRole::tryFrom($role)?->canViewSales() === true;
     }
 
+    public function viewReports(User $user, Organization $organization): bool
+    {
+        $role = $this->roleFor($user, $organization);
+
+        return $role !== null
+            && OrganizationRole::tryFrom($role)?->canViewReports() === true;
+    }
+
+    public function manageExpenses(User $user, Organization $organization): bool
+    {
+        $role = $this->roleFor($user, $organization);
+
+        return $role !== null
+            && OrganizationRole::tryFrom($role)?->canManageExpenses() === true;
+    }
+
     private function roleFor(User $user, Organization $organization): ?string
     {
         $membership = $user->organizations()

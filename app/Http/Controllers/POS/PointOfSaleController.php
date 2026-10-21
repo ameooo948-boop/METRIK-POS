@@ -62,6 +62,17 @@ class PointOfSaleController extends Controller
                 'openedAt' => $shift->opened_at?->format('Y-m-d H:i'),
             ] : null,
             'initialProducts' => $this->searchProductsData((int) $organization->getKey(), (int) $branch->getKey(), '', 24),
+            'offlineContext' => [
+                'organizationId' => (int) $organization->getKey(),
+                'organizationName' => (string) $organization->name,
+                'branchId' => (int) $branch->getKey(),
+                'branchName' => (string) $branch->name,
+                'cashierId' => $userId,
+                'cashierName' => (string) $request->user()->name,
+                'shiftId' => $shift ? (int) $shift->getKey() : null,
+                'shiftOpenedAt' => $shift?->opened_at?->toIso8601String(),
+                'currency' => (string) ($organization->currency ?? 'EGP'),
+            ],
             'recentSales' => $sales,
             'canViewSales' => $request->user()->can('viewSales', $organization),
             'flashMessage' => $request->session()->get('success'),
@@ -87,6 +98,66 @@ class PointOfSaleController extends Controller
         );
 
         return response()->json(['data' => $products]);
+    }
+
+    /**
+     * Paginated catalog snapshot used by the offline-first POS client.
+     * Only product metadata and the current branch balance are returned; no customer data is cached.
+     */
+    public function offlineCatalog(Request $request): JsonResponse
+    {
+        /** @var Organization $organization */
+        $organization = $request->attributes->get('currentOrganization');
+        $this->authorize('usePos', $organization);
+
+        $branch = $request->attributes->get('currentBranch');
+        abort_if($branch === null, 404);
+
+        $validated = $request->validate([
+            'after_id' => ['nullable', 'integer', 'min:0'],
+            'limit' => ['nullable', 'integer', 'min:1', 'max:500'],
+        ]);
+
+        $limit = (int) ($validated['limit'] ?? 500);
+        $products = Product::query()
+            ->forOrganization((int) $organization->getKey())
+            ->active()
+            ->where('id', '>', (int) ($validated['after_id'] ?? 0))
+            ->with([
+                'baseUnit:id,name_ar,name_en',
+                'barcodes:id,product_id,barcode',
+                'inventoryBalances' => fn ($query) => $query->where('branch_id', $branch->getKey()),
+            ])
+            ->orderBy('id')
+            ->limit($limit + 1)
+            ->get();
+
+        $hasMore = $products->count() > $limit;
+        if ($hasMore) {
+            $products = $products->take($limit);
+        }
+
+        $data = $products->map(static function (Product $product) use ($branch): array {
+            $balance = $product->inventoryBalances->first();
+
+            return [
+                'id' => (int) $product->getKey(),
+                'sku' => $product->sku,
+                'name' => $product->name,
+                'sellingPrice' => (string) $product->selling_price,
+                'stock' => (string) ($balance?->quantity ?? '0.000'),
+                'unitName' => $product->baseUnit?->name_ar ?? $product->baseUnit?->name_en ?? 'وحدة',
+                'barcodes' => $product->barcodes->pluck('barcode')->values()->all(),
+                'catalogScopeKey' => (int) $product->organization_id.':'.(int) $branch->getKey(),
+            ];
+        })->values()->all();
+
+        $last = count($data) > 0 ? $data[count($data) - 1] : null;
+
+        return response()->json([
+            'data' => $data,
+            'next_after_id' => $hasMore && $last !== null ? (int) $last['id'] : null,
+        ]);
     }
 
     /** @return list<array<string, mixed>> */

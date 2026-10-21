@@ -1,0 +1,18 @@
+{
+  "id": "/",
+  "name": "Metrik POS | إدارة السوبر ماركت",
+  "short_name": "Metrik POS",
+  "description": "نظام إدارة السوبر ماركت ونقطة البيع والمخزون متعدد الفروع",
+  "lang": "ar",
+  "dir": "rtl",
+  "start_url": "/pos",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "landscape-primary",
+  "background_color": "#020617",
+  "theme_color": "#020617",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

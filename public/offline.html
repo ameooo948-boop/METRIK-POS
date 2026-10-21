@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#020617">
+    <meta name="description" content="شاشة البيع دون اتصال من Metrik POS">
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png">
+    <title>Metrik POS — وضع عدم الاتصال</title>
+    <style>
+        :root{color-scheme:dark;--bg:#020617;--panel:#0f172a;--line:#263449;--text:#e2e8f0;--muted:#94a3b8;--green:#6ee7b7;--red:#fda4af;--amber:#fcd34d}
+        *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:Tahoma,Arial,sans-serif}button,input{font:inherit}button{cursor:pointer}button:disabled{opacity:.45;cursor:not-allowed}.wrap{max-width:1500px;margin:auto;padding:18px}.header,.panel,.notice{border:1px solid var(--line);border-radius:18px;background:var(--panel)}.header{padding:16px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.brand{font-weight:900;letter-spacing:.05em}.brand b{color:var(--green)}.muted{color:var(--muted)}.pill{border-radius:999px;padding:7px 11px;background:#172033;font-size:13px}.pill.offline{color:var(--amber)}.grid{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(320px,.9fr);gap:16px;margin-top:16px;align-items:start}.panel{padding:18px;min-width:0}.panel h2{margin:0 0 8px;font-size:20px}.search{display:flex;gap:8px;margin:15px 0}.search input,.field input{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px;color:var(--text);min-width:0}.btn{border:0;border-radius:10px;padding:11px 15px;font-weight:700}.primary{background:var(--green);color:#052e25}.secondary{background:#1e293b;border:1px solid var(--line);color:var(--text)}.danger{color:var(--red);background:#451a25}.products{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:10px;max-height:65vh;overflow:auto}.product{border:1px solid var(--line);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:9px}.product-name{font-weight:700;overflow-wrap:anywhere}.product button{margin-top:auto}.cartline{border:1px solid var(--line);border-radius:12px;padding:12px;margin-top:10px}.cartline-top{display:flex;justify-content:space-between;gap:10px}.qty{width:105px!important}.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.total{font-size:22px;font-weight:900;display:flex;justify-content:space-between;border-top:1px solid var(--line);padding-top:16px;margin-top:16px}.total span:last-child{color:var(--green)}.notice{padding:13px 15px;margin-top:14px;font-size:14px;line-height:1.7}.notice.warn{border-color:#854d0e;color:#fde68a}.notice.error{border-color:#9f1239;color:#fecdd3}.notice.success{border-color:#065f46;color:#a7f3d0}.full{width:100%;margin-top:12px}.empty{text-align:center;padding:30px 12px;color:var(--muted)}.queueitem{padding:10px 0;border-bottom:1px solid var(--line);font-size:13px}.hidden{display:none!important}
+        @media(max-width:850px){.grid{grid-template-columns:1fr}.products{max-height:none;grid-template-columns:repeat(auto-fit,minmax(140px,1fr))}.wrap{padding:10px}.panel{padding:14px}}
+    </style>
+</head>
+<body>
+<div class="wrap">
+    <header class="header">
+        <div><div class="brand">METRIK <b>POS</b></div><div id="market" class="muted" style="margin-top:6px">جارٍ تحميل بيانات الجهاز…</div></div>
+        <div class="row"><span class="pill offline">وضع عدم الاتصال</span><span id="queue-count" class="pill">العمليات المعلقة: —</span><button id="reconnect" class="btn secondary">الاتصال عاد؟ افتح النظام</button></div>
+    </header>
+
+    <div class="notice warn" id="offline-warning">
+        هذه شاشة طوارئ محلية. الأسعار والأرصدة مأخوذة من آخر مزامنة وقديمة؛ الخادم سيعيد التحقق من السعر والمخزون عند المزامنة. البيع غير النقدي غير متاح دون اتصال. لا تسجّل بيعًا إلا بعد التأكد من استلام المبلغ فعليًا.
+    </div>
+    <div class="notice error hidden" id="fatal"></div>
+    <div class="notice success hidden" id="flash" role="status"></div>
+
+    <main class="grid">
+        <section class="panel">
+            <h2>منتجات محفوظة على الجهاز</h2>
+            <p id="catalog-status" class="muted">تُعرض المنتجات التي تمت مزامنتها مسبقًا فقط.</p>
+            <div class="search"><label for="query" class="hidden">بحث المنتجات</label><input id="query" placeholder="اسم المنتج أو SKU أو باركود" autocomplete="off"><button id="clear-query" class="btn secondary">مسح</button></div>
+            <div id="products" class="products"></div>
+            <div id="products-empty" class="empty hidden">لا توجد منتجات محفوظة مطابقة للبحث. اتصل بالإنترنت وافتح نقطة البيع لمزامنة الكتالوج.</div>
+        </section>
+
+        <section class="panel">
+            <div class="row" style="justify-content:space-between"><h2>سلة البيع المحلي</h2><button id="clear-cart" class="btn secondary">تفريغ</button></div>
+            <p id="shift-status" class="muted">لا توجد وردية محلية نشطة.</p>
+            <div id="cart"></div>
+            <div id="cart-empty" class="empty">السلة فارغة.</div>
+            <div class="total"><span>الإجمالي التقديري</span><span id="total">0.00 ج.م</span></div>
+            <button id="save-sale" class="btn primary full" disabled>حفظ البيع على الجهاز فقط</button>
+            <div class="notice warn">لن تصدر فاتورة مركزية الآن. احتفظ بإيصالك المحلي، ثم أعد الاتصال وافتح Metrik POS لمزامنة العملية.</div>
+            <h2 style="margin-top:22px">آخر العمليات المحلية</h2>
+            <div id="queue"></div>
+        </section>
+    </main>
+</div>
+<script src="/offline-pos.js" defer></script>
+</body>
+</html>

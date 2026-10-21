@@ -1,11 +1,26 @@
 <script setup>
-import { computed, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch, nextTick } from 'vue';
 import axios from 'axios';
 import { Head, Link, useForm } from '@inertiajs/vue3';
+import {
+    applyUnsettledOfflineSales,
+    createOfflineContext,
+    enqueueOfflineSale,
+    getCachedProducts,
+    getOfflineCart,
+    getOutboxForCatalogScope,
+    getOutboxForSaleScope,
+    saveActiveOfflineContext,
+    saveOfflineCart,
+    updateOutboxEntry,
+    syncOfflineCatalog,
+    syncPendingOfflineSales,
+} from '../../offline/pos-offline-db';
 
 const props = defineProps({
     organization: { type: Object, required: true },
     currentBranch: { type: Object, required: true },
+    offlineContext: { type: Object, required: true },
     shift: { type: Object, default: null },
     initialProducts: { type: Array, required: true },
     recentSales: { type: Array, required: true },
@@ -19,6 +34,19 @@ const products = ref(props.initialProducts);
 const cart = ref([]);
 const isSearching = ref(false);
 const searchError = ref('');
+const isOnline = ref(typeof navigator !== 'undefined' ? navigator.onLine : false);
+const serverReachable = ref(isOnline.value);
+const isSyncingOffline = ref(false);
+const catalogSyncing = ref(false);
+const cachedProductsCount = ref(0);
+const pendingSalesCount = ref(0);
+const needsReviewEntries = ref([]);
+const offlineStatusMessage = ref('');
+const cachedCatalog = ref([]);
+const isRestoringCart = ref(false);
+const offlineContext = computed(() => createOfflineContext(props.offlineContext));
+const isConnected = computed(() => isOnline.value && serverReachable.value);
+const needsReviewCount = computed(() => needsReviewEntries.value.length);
 
 const openShiftForm = useForm({ opening_amount: '0.00' });
 const closeShiftForm = useForm({ closing_amount: props.shift?.expectedCash ?? '0.00' });
@@ -49,29 +77,99 @@ const totalCents = computed(() => cart.value.reduce((sum, line) => {
 const estimatedTotal = computed(() => (totalCents.value / 100).toFixed(2));
 const totalQuantity = computed(() => cart.value.reduce((sum, item) => sum + Number(item.quantity || 0), 0));
 
+function filterCachedProducts() {
+    const term = searchQuery.value.trim().toLocaleLowerCase('ar');
+    const matches = !term ? cachedCatalog.value : cachedCatalog.value.filter((product) => {
+        const values = [product.name, product.sku, ...(product.barcodes || [])];
+        return values.some((value) => String(value || '').toLocaleLowerCase('ar').includes(term));
+    });
+    products.value = matches.slice(0, term ? 120 : 60);
+}
+
+async function refreshCachedCatalog() {
+    const context = offlineContext.value;
+    const cached = await getCachedProducts(context.catalogScopeKey);
+    const outbox = await getOutboxForCatalogScope(context.catalogScopeKey);
+    cachedCatalog.value = applyUnsettledOfflineSales(cached, outbox);
+    cachedProductsCount.value = cached.length;
+    filterCachedProducts();
+}
+
+async function refreshOutboxCounts() {
+    const context = offlineContext.value;
+    if (!context.saleScopeKey) {
+        pendingSalesCount.value = 0;
+        needsReviewEntries.value = [];
+        return;
+    }
+    const entries = await getOutboxForSaleScope(context.saleScopeKey);
+    pendingSalesCount.value = entries.filter((entry) => ['pending', 'syncing'].includes(entry.status)).length;
+    needsReviewEntries.value = entries.filter((entry) => entry.status === 'needs_review');
+}
+
+async function restoreCartFromLocal() {
+    const context = offlineContext.value;
+    if (!context.saleScopeKey) return;
+    const saved = await getOfflineCart(context.saleScopeKey);
+    const byId = new Map(cachedCatalog.value.map((product) => [Number(product.id), product]));
+    isRestoringCart.value = true;
+    cart.value = saved.map((line) => {
+        const product = byId.get(Number(line.productId));
+        return product ? { product, quantity: String(line.quantity) } : null;
+    }).filter(Boolean);
+    await nextTick();
+    isRestoringCart.value = false;
+}
+
 async function searchProducts() {
     isSearching.value = true;
     searchError.value = '';
+    if (!isConnected.value) {
+        try {
+            await refreshCachedCatalog();
+            filterCachedProducts();
+            if (!cachedProductsCount.value) searchError.value = 'لا توجد نسخة محلية من الكتالوج. اتصل بالإنترنت وافتح نقطة البيع لمزامنتها.';
+        } catch (error) {
+            searchError.value = error?.message || 'تعذر قراءة الكتالوج المحفوظ على الجهاز.';
+        } finally {
+            isSearching.value = false;
+        }
+        return;
+    }
+
     try {
         const response = await axios.get('/pos/products/search', { params: { q: searchQuery.value.trim() } });
-        products.value = response.data.data;
+        serverReachable.value = true;
+        const outbox = await getOutboxForCatalogScope(offlineContext.value.catalogScopeKey);
+        products.value = applyUnsettledOfflineSales(response.data.data, outbox);
     } catch (error) {
-        searchError.value = error?.response?.status === 429
-            ? 'عدد عمليات البحث كبير جدًا. انتظر قليلًا ثم حاول مرة أخرى.'
-            : 'تعذر البحث عن المنتجات. تحقق من الاتصال وحاول مرة أخرى.';
+        if (!error?.response) serverReachable.value = false;
+        if (!navigator.onLine || !serverReachable.value) {
+            await refreshCachedCatalog();
+            filterCachedProducts();
+            searchError.value = cachedProductsCount.value
+                ? 'الاتصال بالخادم غير متاح؛ يتم البحث في الكتالوج المحفوظ محليًا.'
+                : 'تعذر الاتصال ولا توجد نسخة محلية من الكتالوج.';
+        } else {
+            searchError.value = error?.response?.status === 429
+                ? 'عدد عمليات البحث كبير جدًا. انتظر قليلًا ثم حاول مرة أخرى.'
+                : 'تعذر البحث عن المنتجات. تحقق من الاتصال وحاول مرة أخرى.';
+        }
     } finally {
         isSearching.value = false;
     }
 }
 
 function addToCart(product) {
-    if (Number(product.stock) <= 0) return;
+    if (!props.shift || Number(product.stock) <= 0) return;
     const existing = cart.value.find((line) => Number(line.product.id) === Number(product.id));
-    if (existing) {
-        existing.quantity = (Number(existing.quantity) + 1).toFixed(3);
-    } else {
-        cart.value.push({ product, quantity: '1.000' });
+    const nextQuantity = (existing ? Number(existing.quantity) : 0) + 1;
+    if (nextQuantity > Number(product.stock)) {
+        offlineStatusMessage.value = 'الكمية المتاحة محليًا لا تكفي. حدّث المخزون عند الاتصال قبل متابعة البيع.';
+        return;
     }
+    if (existing) existing.quantity = nextQuantity.toFixed(3);
+    else cart.value.push({ product, quantity: '1.000' });
 }
 
 function removeFromCart(productId) {
@@ -99,13 +197,95 @@ function openShift() {
     openShiftForm.post('/pos/shifts', { preserveScroll: true });
 }
 
-function closeShift() {
+async function closeShift() {
     if (!props.shift) return;
+    await refreshOutboxCounts();
+    if (pendingSalesCount.value || needsReviewCount.value) {
+        offlineStatusMessage.value = 'لا يمكن إغلاق الوردية قبل مزامنة المبيعات المحلية ومعالجة العمليات التي تحتاج مراجعة.';
+        return;
+    }
+    if (!isConnected.value) {
+        offlineStatusMessage.value = 'إغلاق الوردية يتطلب اتصالًا بالخادم.';
+        return;
+    }
     closeShiftForm.post(`/pos/shifts/${props.shift.id}/close`, { preserveScroll: true });
 }
 
-function checkout() {
+async function queueOfflineCheckout() {
+    const context = offlineContext.value;
+    if (!context.saleScopeKey || !context.shiftId || !props.shift) {
+        offlineStatusMessage.value = 'لا توجد وردية صالحة محفوظة على الجهاز. اتصل بالإنترنت وافتح وردية أولًا.';
+        return;
+    }
+    if (checkoutForm.payment_method !== 'cash') {
+        offlineStatusMessage.value = 'البيع دون اتصال متاح نقدًا فقط. لا تسجل بطاقة أو محفظة قبل التأكد من الدفع عبر مزود الخدمة.';
+        return;
+    }
+
+    const cachedById = new Map(cachedCatalog.value.map((product) => [Number(product.id), product]));
+    for (const line of cart.value) {
+        const latest = cachedById.get(Number(line.product.id));
+        if (!latest || Number(line.quantity) > Number(latest.stock)) {
+            offlineStatusMessage.value = `الرصيد المحلي لمنتج «${line.product.name}» لا يكفي بعد احتساب المبيعات غير المتزامنة.`;
+            return;
+        }
+    }
+
+    const createdAt = new Date().toISOString();
+    const uuid = checkoutForm.client_operation_uuid;
+    const items = cart.value.map((line) => ({
+        product_id: Number(line.product.id),
+        quantity: String(line.quantity),
+        price_snapshot: Number(line.product.sellingPrice).toFixed(2),
+    }));
+    const estimatedTotal = items.reduce((sum, item) => sum + Math.round(Number(item.quantity) * Number(item.price_snapshot) * 100) / 100, 0);
+
+    await enqueueOfflineSale({
+        uuid,
+        saleScopeKey: context.saleScopeKey,
+        catalogScopeKey: context.catalogScopeKey,
+        context,
+        payment_method: 'cash',
+        notes: checkoutForm.notes || 'بيع محفوظ محليًا دون اتصال',
+        items,
+        offline_created_at: createdAt,
+        createdAt,
+        estimatedTotal: estimatedTotal.toFixed(2),
+    });
+
+    cart.value = [];
+    checkoutForm.reset('notes');
+    checkoutForm.items = [];
+    checkoutForm.client_operation_uuid = createOperationUuid();
+    await saveOfflineCart(context.saleScopeKey, []);
+    await refreshOutboxCounts();
+    await refreshCachedCatalog();
+    offlineStatusMessage.value = `تم حفظ البيع محليًا (مرجع ${uuid.slice(0, 8)}). لم تصدر فاتورة مركزية بعد.`;
+}
+
+async function checkout() {
     if (!props.shift || cart.value.length === 0) return;
+    if (!isConnected.value) {
+        try {
+            await queueOfflineCheckout();
+        } catch (error) {
+            offlineStatusMessage.value = error?.message || 'تعذر حفظ البيع محليًا. لا تغلق هذه الصفحة قبل مراجعة الخطأ.';
+        }
+        return;
+    }
+
+    await refreshOutboxCounts();
+    if (pendingSalesCount.value || needsReviewCount.value) {
+        const syncResult = await syncPendingOfflineSales(offlineContext.value, axios);
+        await refreshOutboxCounts();
+        if (syncResult.pending || syncResult.needsReview || syncResult.stopped) {
+            offlineStatusMessage.value = syncResult.needsReview
+                ? 'توجد مبيعات دون اتصال تحتاج مراجعة (سعر أو مخزون أو وردية). عالجها قبل إجراء بيع جديد.'
+                : 'توجد مبيعات محلية لم تتم مزامنتها بعد. افحص حالة الاتصال ثم أعد المحاولة.';
+            return;
+        }
+    }
+
     checkoutForm.items = cart.value.map((line) => ({
         product_id: Number(line.product.id),
         quantity: String(line.quantity),
@@ -117,10 +297,147 @@ function checkout() {
             checkoutForm.reset('notes');
             checkoutForm.items = [];
             checkoutForm.client_operation_uuid = createOperationUuid();
+            offlineStatusMessage.value = '';
             searchProducts();
+        },
+        onNetworkError: () => {
+            serverReachable.value = false;
+            offlineStatusMessage.value = 'فشل الاتصال أثناء البيع. راجع حالة الفاتورة قبل إعادة المحاولة؛ لا يتم حفظ عملية تلقائيًا لتجنب تكرار البيع.';
         },
     });
 }
+
+async function retryReviewedSale(entry) {
+    if (!isConnected.value) {
+        offlineStatusMessage.value = 'إعادة المحاولة تتطلب اتصالًا بالخادم.';
+        return;
+    }
+
+    const productById = new Map(cachedCatalog.value.map((product) => [Number(product.id), product]));
+    const oldTotal = Number(entry.estimatedTotal || 0);
+    let newTotal = 0;
+    const revisedItems = [];
+
+    for (const item of entry.items || []) {
+        const product = productById.get(Number(item.product_id));
+        if (!product) {
+            offlineStatusMessage.value = 'يوجد منتج لم يعد موجودًا في الكتالوج النشط. لا يمكن إعادة المحاولة تلقائيًا.';
+            return;
+        }
+        const price = Number(product.sellingPrice).toFixed(2);
+        newTotal += Math.round(Number(item.quantity) * Number(price) * 100) / 100;
+        revisedItems.push({ ...item, price_snapshot: price });
+    }
+
+    const message = `إعادة المحاولة للمرجع ${entry.uuid.slice(0, 8)}.
+الإجمالي المحلي القديم: ${money(oldTotal)} ج.م
+الإجمالي حسب الأسعار الحالية: ${money(newTotal)} ج.م
+تأكد من مراجعة المخزون والمبلغ المقبوض فعليًا قبل المتابعة.`;
+    if (!window.confirm(message)) return;
+
+    await updateOutboxEntry(entry.uuid, {
+        status: 'pending',
+        items: revisedItems,
+        estimatedTotal: newTotal.toFixed(2),
+        lastError: null,
+    });
+    await refreshOutboxCounts();
+    offlineStatusMessage.value = 'أُعيد وضع العملية في قائمة المزامنة. سيعيد الخادم التحقق من السعر والمخزون والوردية.';
+    await syncOfflineWork();
+}
+
+async function syncOfflineWork() {
+    if (!navigator.onLine) {
+        isOnline.value = false;
+        serverReachable.value = false;
+        offlineStatusMessage.value = 'لا يوجد اتصال بالشبكة الآن.';
+        return;
+    }
+
+    isSyncingOffline.value = true;
+    try {
+        const result = await syncPendingOfflineSales(offlineContext.value, axios);
+        if (result.stopped === 'authentication') {
+            serverReachable.value = false;
+            offlineStatusMessage.value = 'انتهت جلسة الدخول أو تحتاج إلى تحقق. سجّل الدخول ثم أعد مزامنة العمليات.';
+            return;
+        }
+        catalogSyncing.value = true;
+        await syncOfflineCatalog(offlineContext.value, axios);
+        catalogSyncing.value = false;
+        serverReachable.value = true;
+        isOnline.value = navigator.onLine;
+        await refreshOutboxCounts();
+        await refreshCachedCatalog();
+        if (result.needsReview) {
+            offlineStatusMessage.value = `تمت مزامنة ${result.synced} عملية، وتوجد ${result.needsReview} عملية تحتاج مراجعة يدوية.`;
+        } else if (result.pending) {
+            offlineStatusMessage.value = `تمت مزامنة ${result.synced} عملية؛ ما زالت ${result.pending} عملية في الانتظار.`;
+        } else {
+            offlineStatusMessage.value = `اكتملت مزامنة المبيعات والكتالوج. المنتجات المحفوظة: ${cachedProductsCount.value}.`;
+        }
+    } catch (error) {
+        catalogSyncing.value = false;
+        if (!error?.response) serverReachable.value = false;
+        offlineStatusMessage.value = error?.response?.data?.message || error?.message || 'تعذرت المزامنة. ستظل المبيعات المحلية محفوظة على الجهاز.';
+    } finally {
+        isSyncingOffline.value = false;
+    }
+}
+
+async function handleOnline() {
+    isOnline.value = true;
+    await syncOfflineWork();
+}
+function handleOffline() {
+    isOnline.value = false;
+    serverReachable.value = false;
+    offlineStatusMessage.value = 'انقطع الاتصال. يمكنك البيع نقدًا بالكتالوج المحفوظ إذا كانت الوردية مفتوحة محليًا.';
+}
+
+watch(cart, (value) => {
+    if (isRestoringCart.value || !offlineContext.value.saleScopeKey) return;
+    saveOfflineCart(offlineContext.value.saleScopeKey, value.map((line) => ({
+        productId: Number(line.product.id),
+        quantity: String(line.quantity),
+    }))).catch((error) => {
+        offlineStatusMessage.value = error?.message || 'تعذر حفظ السلة على الجهاز.';
+    });
+}, { deep: true });
+
+watch(offlineContext, async (context) => {
+    try {
+        await saveActiveOfflineContext(context);
+        await refreshOutboxCounts();
+    } catch (error) {
+        offlineStatusMessage.value = error?.message || 'تعذر تحديث سياق العمل دون اتصال.';
+    }
+}, { deep: true });
+
+onMounted(async () => {
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    try {
+        await saveActiveOfflineContext(offlineContext.value);
+        await refreshCachedCatalog();
+        await restoreCartFromLocal();
+        await refreshOutboxCounts();
+        if (navigator.onLine) await syncOfflineWork();
+        else {
+            isOnline.value = false;
+            serverReachable.value = false;
+            offlineStatusMessage.value = 'غير متصل. ستستخدم النسخة المحلية من المنتجات، وأي بيع محفوظ سيبقى في قائمة المزامنة.';
+        }
+    } catch (error) {
+        offlineStatusMessage.value = error?.message || 'تعذر تهيئة التخزين المحلي. ما زال البيع المتصل متاحًا إذا كان الخادم يعمل.';
+    }
+});
+
+onBeforeUnmount(() => {
+    window.removeEventListener('online', handleOnline);
+    window.removeEventListener('offline', handleOffline);
+});
+
 </script>
 
 <template>
@@ -140,7 +457,36 @@ function checkout() {
             </div>
         </header>
 
+        <section class="mx-auto mt-4 flex max-w-[1500px] flex-col gap-3 rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 sm:mx-6 sm:flex-row sm:items-center sm:justify-between" role="status">
+            <div class="space-y-1 text-sm">
+                <div class="flex flex-wrap items-center gap-2">
+                    <span :class="isConnected ? 'bg-emerald-300/15 text-emerald-200' : 'bg-amber-300/15 text-amber-200'" class="rounded-full px-3 py-1 font-semibold">{{ isConnected ? 'متصل بالخادم' : 'وضع عدم الاتصال' }}</span>
+                    <span class="text-slate-400">كتالوج محلي: {{ cachedProductsCount }} منتج</span>
+                    <span class="text-slate-400">عمليات معلقة: {{ pendingSalesCount }}</span>
+                    <span v-if="needsReviewCount" class="font-semibold text-rose-300">تحتاج مراجعة: {{ needsReviewCount }}</span>
+                </div>
+                <p v-if="offlineStatusMessage" class="text-slate-300">{{ offlineStatusMessage }}</p>
+            </div>
+            <div class="flex flex-wrap gap-2">
+                <button type="button" :disabled="isSyncingOffline || !isOnline" @click="syncOfflineWork" class="rounded-xl border border-emerald-300/30 px-4 py-2 text-sm font-semibold text-emerald-200 disabled:opacity-50">{{ isSyncingOffline || catalogSyncing ? 'جارٍ المزامنة…' : 'مزامنة الآن' }}</button>
+                <a href="/offline.html" class="rounded-xl border border-white/10 px-4 py-2 text-sm text-slate-300 hover:border-emerald-300/30">شاشة الطوارئ دون اتصال</a>
+            </div>
+        </section>
+
         <div class="mx-auto max-w-[1500px] space-y-6 px-4 py-6 sm:px-6 sm:py-8">
+            <section v-if="needsReviewEntries.length" class="space-y-3 rounded-xl border border-rose-300/30 bg-rose-300/10 p-4 text-sm text-rose-100" role="alert">
+                <div>
+                    <p class="font-bold">توجد مبيعات محلية تحتاج مراجعة قبل اعتمادها مركزيًا.</p>
+                    <p class="mt-1">قد يكون السعر تغيّر أو الرصيد المركزي لم يعد كافيًا. راجع النقدية والمخزون الفعلي قبل إعادة المحاولة.</p>
+                </div>
+                <article v-for="entry in needsReviewEntries" :key="entry.uuid" class="flex flex-col gap-3 rounded-lg border border-rose-200/15 bg-slate-950/50 p-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div class="min-w-0">
+                        <p class="font-semibold">مرجع محلي: {{ entry.uuid.slice(0, 8) }} · {{ money(entry.estimatedTotal) }} ج.م</p>
+                        <p class="mt-1 break-words text-xs text-rose-100/80">{{ entry.lastError || 'تحتاج العملية إلى مراجعة.' }}</p>
+                    </div>
+                    <button type="button" :disabled="!isConnected || isSyncingOffline" @click="retryReviewedSale(entry)" class="shrink-0 rounded-lg border border-rose-200/30 px-3 py-2 font-semibold hover:bg-rose-200/10 disabled:opacity-50">مراجعة الأسعار وإعادة المحاولة</button>
+                </article>
+            </section>
             <div v-if="flashMessage" class="rounded-xl border border-emerald-300/20 bg-emerald-300/10 px-4 py-3 text-sm text-emerald-200" role="status">{{ flashMessage }}</div>
             <div v-if="errorMessage" class="rounded-xl border border-rose-300/20 bg-rose-300/10 px-4 py-3 text-sm text-rose-200" role="alert">{{ errorMessage }}</div>
             <div class="flex flex-col justify-between gap-3 md:flex-row md:items-end">
@@ -153,7 +499,7 @@ function checkout() {
                 <h2 class="text-xl font-bold">فتح وردية جديدة</h2><p class="mt-2 text-sm text-slate-400">أدخل النقدية الفعلية الموجودة في درج الكاشير عند بداية الوردية.</p>
                 <form class="mt-5 flex flex-col gap-3 sm:flex-row" @submit.prevent="openShift">
                     <div class="flex-1"><label for="opening-amount" class="mb-2 block text-sm font-medium">الرصيد الافتتاحي (ج.م)</label><input id="opening-amount" v-model="openShiftForm.opening_amount" type="number" min="0" step="0.01" required class="w-full rounded-xl border border-white/10 bg-slate-950 px-4 py-3 outline-none focus:border-emerald-300" /><p v-if="openShiftForm.errors.opening_amount" class="mt-1 text-sm text-rose-300">{{ openShiftForm.errors.opening_amount }}</p></div>
-                    <button :disabled="openShiftForm.processing" class="self-end rounded-xl bg-emerald-300 px-5 py-3 font-bold text-slate-950 disabled:opacity-50">{{ openShiftForm.processing ? 'جارٍ الفتح...' : 'فتح الوردية' }}</button>
+                    <button :disabled="openShiftForm.processing || !isConnected" class="self-end rounded-xl bg-emerald-300 px-5 py-3 font-bold text-slate-950 disabled:opacity-50">{{ openShiftForm.processing ? 'جارٍ الفتح...' : 'فتح الوردية' }}</button>
                 </form>
             </section>
 
@@ -186,14 +532,14 @@ function checkout() {
                         <div class="flex items-center justify-between gap-4 text-slate-400"><span>عدد الأصناف</span><span>{{ cart.length }}</span></div><div class="flex items-center justify-between gap-4 text-xl font-black"><span>الإجمالي</span><span class="text-emerald-200">{{ money(estimatedTotal) }} ج.م</span></div>
                         <div><label for="payment-method" class="mb-2 block text-sm font-medium">طريقة الدفع</label><select id="payment-method" v-model="checkoutForm.payment_method" class="w-full rounded-xl border border-white/10 bg-slate-950 px-4 py-3 outline-none focus:border-emerald-300"><option value="cash">نقدي</option><option value="card">بطاقة</option><option value="mobile_wallet">محفظة إلكترونية</option><option value="other">أخرى</option></select><p v-if="checkoutForm.errors.payment_method" class="mt-1 text-sm text-rose-300">{{ checkoutForm.errors.payment_method }}</p></div>
                         <div><label for="sale-notes" class="mb-2 block text-sm font-medium">ملاحظة (اختياري)</label><input id="sale-notes" v-model="checkoutForm.notes" maxlength="1000" class="w-full rounded-xl border border-white/10 bg-slate-950 px-4 py-3 outline-none focus:border-emerald-300" placeholder="ملاحظة داخلية" /></div>
-                        <button type="button" :disabled="!shift || !cart.length || checkoutForm.processing" @click="checkout" class="w-full rounded-xl bg-emerald-300 px-5 py-4 font-black text-slate-950 disabled:cursor-not-allowed disabled:opacity-40">{{ checkoutForm.processing ? 'جارٍ تسجيل البيع...' : `تأكيد البيع · ${money(estimatedTotal)} ج.م` }}</button>
-                        <p class="text-xs leading-5 text-slate-500">السعر والمخزون والإجمالي يُعاد التحقق منهم على الخادم. إعادة إرسال نفس معرّف العملية لا تخصم المخزون مرتين. التشغيل دون إنترنت سيُضاف في مرحلة المزامنة اللاحقة.</p>
+                        <button type="button" :disabled="!shift || !cart.length || checkoutForm.processing" @click="checkout" class="w-full rounded-xl bg-emerald-300 px-5 py-4 font-black text-slate-950 disabled:cursor-not-allowed disabled:opacity-40">{{ checkoutForm.processing ? 'جارٍ تسجيل البيع...' : (!isConnected ? `حفظ البيع محليًا · ${money(estimatedTotal)} ج.م` : `تأكيد البيع · ${money(estimatedTotal)} ج.م`) }}</button>
+                        <p class="text-xs leading-5 text-slate-500">السعر والمخزون والإجمالي يُعاد التحقق منهم على الخادم. دون اتصال، تُحفظ المبيعات النقدية في الجهاز فقط، ولا تصدر فاتورة مركزية إلا بعد المزامنة. قد تحتاج العملية مراجعة إذا تغير السعر أو لم يكفِ المخزون.</p>
                     </div>
                 </section>
             </div>
 
             <section v-if="shift" class="rounded-2xl border border-white/10 bg-slate-900 p-5 sm:p-6">
-                <div class="grid gap-5 md:grid-cols-[minmax(0,1fr)_minmax(280px,0.8fr)] md:items-end"><div><h2 class="text-xl font-bold">إغلاق الوردية</h2><p class="mt-2 text-sm leading-6 text-slate-400">النقدية المتوقعة: {{ money(shift.expectedCash) }} ج.م. أدخل النقدية التي وجدتها فعليًا، وسيُسجل النظام الفرق للمراجعة.</p></div><form class="flex flex-col gap-3 sm:flex-row" @submit.prevent="closeShift"><div class="flex-1"><label for="closing-amount" class="mb-2 block text-sm font-medium">النقدية الفعلية (ج.م)</label><input id="closing-amount" v-model="closeShiftForm.closing_amount" type="number" min="0" step="0.01" required class="w-full rounded-xl border border-white/10 bg-slate-950 px-4 py-3 outline-none focus:border-emerald-300" /><p v-if="closeShiftForm.errors.closing_amount" class="mt-1 text-sm text-rose-300">{{ closeShiftForm.errors.closing_amount }}</p></div><button :disabled="closeShiftForm.processing" class="self-end rounded-xl border border-rose-300/30 px-5 py-3 font-bold text-rose-200 hover:bg-rose-300/10 disabled:opacity-50">{{ closeShiftForm.processing ? 'جارٍ الإغلاق...' : 'إغلاق الوردية' }}</button></form></div>
+                <div class="grid gap-5 md:grid-cols-[minmax(0,1fr)_minmax(280px,0.8fr)] md:items-end"><div><h2 class="text-xl font-bold">إغلاق الوردية</h2><p class="mt-2 text-sm leading-6 text-slate-400">النقدية المتوقعة: {{ money(shift.expectedCash) }} ج.م. أدخل النقدية التي وجدتها فعليًا، وسيُسجل النظام الفرق للمراجعة.</p></div><form class="flex flex-col gap-3 sm:flex-row" @submit.prevent="closeShift"><div class="flex-1"><label for="closing-amount" class="mb-2 block text-sm font-medium">النقدية الفعلية (ج.م)</label><input id="closing-amount" v-model="closeShiftForm.closing_amount" type="number" min="0" step="0.01" required class="w-full rounded-xl border border-white/10 bg-slate-950 px-4 py-3 outline-none focus:border-emerald-300" /><p v-if="closeShiftForm.errors.closing_amount" class="mt-1 text-sm text-rose-300">{{ closeShiftForm.errors.closing_amount }}</p></div><button :disabled="closeShiftForm.processing || !isConnected || pendingSalesCount > 0 || needsReviewCount > 0" class="self-end rounded-xl border border-rose-300/30 px-5 py-3 font-bold text-rose-200 hover:bg-rose-300/10 disabled:opacity-50">{{ closeShiftForm.processing ? 'جارٍ الإغلاق...' : 'إغلاق الوردية' }}</button></form></div>
             </section>
 
             <section class="space-y-4 rounded-2xl border border-white/10 bg-slate-900 p-5 sm:p-6">

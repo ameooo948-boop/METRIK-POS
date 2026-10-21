@@ -4,7 +4,7 @@ namespace App\Data\POS;
 
 final readonly class CreateSaleData
 {
-    /** @param list<array{product_id:int,quantity:string}> $items */
+    /** @param list<array{product_id:int,quantity:string,price_snapshot?:string}> $items */
     public function __construct(
         public int $organizationId,
         public int $branchId,
@@ -13,11 +13,19 @@ final readonly class CreateSaleData
         public string $paymentMethod,
         public ?string $notes,
         public array $items,
+        public ?int $expectedCashShiftId = null,
+        public ?string $offlineCreatedAt = null,
     ) {}
 
     /** @param array<string, mixed> $data */
-    public static function fromValidated(array $data, int $organizationId, int $branchId, int $cashierId): self
-    {
+    public static function fromValidated(
+        array $data,
+        int $organizationId,
+        int $branchId,
+        int $cashierId,
+        ?int $expectedCashShiftId = null,
+        ?string $offlineCreatedAt = null,
+    ): self {
         return new self(
             organizationId: $organizationId,
             branchId: $branchId,
@@ -25,10 +33,20 @@ final readonly class CreateSaleData
             clientOperationUuid: strtolower((string) $data['client_operation_uuid']),
             paymentMethod: (string) $data['payment_method'],
             notes: isset($data['notes']) && trim((string) $data['notes']) !== '' ? trim((string) $data['notes']) : null,
-            items: array_map(static fn (array $item): array => [
-                'product_id' => (int) $item['product_id'],
-                'quantity' => (string) $item['quantity'],
-            ], $data['items']),
+            items: array_map(static function (array $item): array {
+                $normalised = [
+                    'product_id' => (int) $item['product_id'],
+                    'quantity' => (string) $item['quantity'],
+                ];
+
+                if (array_key_exists('price_snapshot', $item)) {
+                    $normalised['price_snapshot'] = (string) $item['price_snapshot'];
+                }
+
+                return $normalised;
+            }, $data['items']),
+            expectedCashShiftId: $expectedCashShiftId,
+            offlineCreatedAt: $offlineCreatedAt,
         );
     }
 }

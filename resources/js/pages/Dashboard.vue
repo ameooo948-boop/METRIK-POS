@@ -12,6 +12,8 @@ const props = defineProps({
     canViewPurchases: { type: Boolean, required: true },
     canUsePos: { type: Boolean, required: true },
     canViewSales: { type: Boolean, required: true },
+    canViewReports: { type: Boolean, required: true },
+    canManageExpenses: { type: Boolean, required: true },
     flashMessage: { type: String, default: null },
 });
 
@@ -41,6 +43,7 @@ function switchOrganization(event) {
                     <Link href="/products" class="hidden rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold hover:border-emerald-300/50 sm:inline-flex">المنتجات</Link>
                     <Link v-if="props.canViewPurchases" href="/suppliers" class="hidden rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold hover:border-emerald-300/50 md:inline-flex">الموردون</Link>
                     <Link v-if="props.canViewPurchases" href="/purchase-invoices" class="hidden rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold hover:border-emerald-300/50 lg:inline-flex">المشتريات</Link>
+                    <Link v-if="props.canViewReports" href="/reports" class="hidden rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold hover:border-emerald-300/50 md:inline-flex">التقارير</Link>
                     <Link href="/branches" class="hidden rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold hover:border-emerald-300/50 sm:inline-flex">الفروع</Link>
                     <button @click="logout" class="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold hover:border-rose-300/40 hover:text-rose-200">خروج</button>
                 </div>
@@ -66,6 +69,8 @@ function switchOrganization(event) {
                 <Link href="/products" class="rounded-2xl border border-white/10 bg-slate-900 p-6 transition hover:border-emerald-300/40"><p class="text-sm font-semibold text-emerald-300">الكتالوج</p><h2 class="mt-2 text-xl font-bold">المنتجات والمخزون</h2><p class="mt-2 text-sm leading-6 text-slate-400">إدارة الأصناف والباركود وأرصدة الفرع.</p></Link>
                 <Link v-if="props.canViewPurchases" href="/suppliers" class="rounded-2xl border border-white/10 bg-slate-900 p-6 transition hover:border-emerald-300/40"><p class="text-sm font-semibold text-emerald-300">الموردون</p><h2 class="mt-2 text-xl font-bold">دليل الموردين</h2><p class="mt-2 text-sm leading-6 text-slate-400">بيانات الموردين ورصيد كل مورد من الفواتير المسجلة.</p></Link>
                 <Link v-if="props.canViewPurchases" href="/purchase-invoices" class="rounded-2xl border border-white/10 bg-slate-900 p-6 transition hover:border-emerald-300/40"><p class="text-sm font-semibold text-emerald-300">المشتريات</p><h2 class="mt-2 text-xl font-bold">فواتير الشراء والاستلام</h2><p class="mt-2 text-sm leading-6 text-slate-400">استلام بضاعة وتحديث المخزون وتسجيل المدفوع والمتبقي.</p></Link>
+                <Link v-if="props.canViewReports" href="/reports" class="rounded-2xl border border-white/10 bg-slate-900 p-6 transition hover:border-emerald-300/40"><p class="text-sm font-semibold text-emerald-300">الأداء المالي</p><h2 class="mt-2 text-xl font-bold">تقارير المبيعات والأرباح</h2><p class="mt-2 text-sm leading-6 text-slate-400">تحليل المبيعات وتكلفة البضاعة والمصروفات المسجلة.</p></Link>
+                <Link v-if="props.canManageExpenses" href="/expenses" class="rounded-2xl border border-white/10 bg-slate-900 p-6 transition hover:border-emerald-300/40"><p class="text-sm font-semibold text-emerald-300">الإدارة المالية</p><h2 class="mt-2 text-xl font-bold">مصروفات الفرع</h2><p class="mt-2 text-sm leading-6 text-slate-400">تسجيل مصروفات التشغيل ومراجعة سجلها.</p></Link>
                 <section class="rounded-2xl border border-white/10 bg-slate-900 p-6"><h2 class="text-xl font-bold">إعدادات المؤسسة</h2><p class="mt-2 leading-7 text-slate-400">تُدار العضويات والفروع حسب صلاحيات حسابك.</p><Link href="/branches" class="mt-4 inline-flex rounded-xl bg-emerald-300 px-4 py-3 font-bold text-slate-950 hover:bg-emerald-200">{{ props.canManageBranches ? 'إدارة الفروع' : 'عرض فروعك' }}</Link></section>
             </div>
 

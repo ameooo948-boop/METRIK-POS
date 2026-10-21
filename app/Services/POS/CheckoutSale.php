@@ -3,6 +3,7 @@
 namespace App\Services\POS;
 
 use App\Data\POS\CreateSaleData;
+use App\Events\OperationalReportDataChanged;
 use App\Models\Branch;
 use App\Models\CashMovement;
 use App\Models\CashShift;
@@ -14,6 +15,7 @@ use App\Models\SaleItem;
 use App\Models\SalePayment;
 use App\Support\DecimalMoney;
 use App\Support\DecimalQuantity;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -24,7 +26,7 @@ class CheckoutSale
     public function handle(CreateSaleData $data): Sale
     {
         try {
-            return DB::transaction(function () use ($data): Sale {
+            $sale = DB::transaction(function () use ($data): Sale {
                 $existing = $this->existingSale($data, lock: true);
                 if ($existing) {
                     return $existing->load(['items', 'payments', 'branch', 'cashier']);
@@ -46,8 +48,25 @@ class CheckoutSale
 
                 if (! $shift) {
                     throw ValidationException::withMessages([
-                        'items' => 'افتح وردية كاشير قبل تسجيل أي عملية بيع.',
+                        ($data->expectedCashShiftId !== null ? 'shift_id' : 'items') => 'افتح وردية كاشير قبل تسجيل أي عملية بيع.',
                     ]);
+                }
+
+                if ($data->expectedCashShiftId !== null && (int) $shift->getKey() !== $data->expectedCashShiftId) {
+                    throw ValidationException::withMessages([
+                        'shift_id' => 'الوردية الحالية تختلف عن الوردية التي سُجلت فيها المبيعات دون اتصال. لا يمكن مزامنة العملية تلقائيًا؛ راجع مدير الفرع.',
+                    ]);
+                }
+
+                if ($data->offlineCreatedAt !== null) {
+                    $offlineCreatedAt = CarbonImmutable::parse($data->offlineCreatedAt);
+                    $openedAt = $shift->opened_at ? CarbonImmutable::parse($shift->opened_at) : null;
+
+                    if ($offlineCreatedAt->greaterThan(now()->addMinutes(5)) || ($openedAt && $offlineCreatedAt->lessThan($openedAt->subMinutes(2)))) {
+                        throw ValidationException::withMessages([
+                            'offline_created_at' => 'وقت عملية البيع خارج فترة الوردية المسموح بها. راجع الوقت والوردية قبل المزامنة.',
+                        ]);
+                    }
                 }
 
                 // Recheck the idempotency key after locking the shift. A retry may have
@@ -98,6 +117,14 @@ class CheckoutSale
                     $quantityMilli = DecimalQuantity::toMilli((string) $item['quantity']);
                     $unitPriceCents = DecimalMoney::toCents((string) $product->selling_price);
                     $unitCostCents = DecimalMoney::toCents((string) $product->purchase_price);
+
+                    if (array_key_exists('price_snapshot', $item)
+                        && DecimalMoney::toCents((string) $item['price_snapshot']) !== $unitPriceCents) {
+                        throw ValidationException::withMessages([
+                            'items.'.$index.'.price_snapshot' => 'تغير سعر «'.$product->name.'» منذ آخر مزامنة للكتالوج. حدّث الأسعار وراجع الفاتورة قبل إعادة المزامنة.',
+                        ]);
+                    }
+
                     if ($unitPriceCents < 0 || $unitPriceCents > 999_999_999 || $unitCostCents < 0 || $unitCostCents > 999_999_999) {
                         throw ValidationException::withMessages([
                             'items.'.$index.'.product_id' => 'سعر المنتج أو تكلفته خارج النطاق المسموح به. راجع بيانات المنتج.',
@@ -151,6 +178,8 @@ class CheckoutSale
                     'total' => DecimalMoney::fromCents($subtotalCents),
                     'notes' => $data->notes,
                     'sold_at' => now(),
+                    'offline_created_at' => $data->offlineCreatedAt,
+                    'offline_sync_received_at' => $data->offlineCreatedAt !== null ? now() : null,
                 ]);
 
                 foreach ($preparedItems as $item) {
@@ -231,6 +260,10 @@ class CheckoutSale
 
                 return $sale->load(['items', 'payments', 'branch', 'cashier']);
             }, attempts: 3);
+
+            event(new OperationalReportDataChanged($data->organizationId));
+
+            return $sale;
         } catch (QueryException $exception) {
             // Concurrent duplicate submissions may race on the database unique key.
             $existing = $this->existingSale($data, lock: false);
@@ -260,6 +293,12 @@ class CheckoutSale
         if ((int) $existing->branch_id !== $data->branchId || (int) $existing->cashier_id !== $data->cashierId) {
             throw ValidationException::withMessages([
                 'client_operation_uuid' => 'معرّف عملية البيع مستخدم لعملية أخرى. أعد المحاولة بعملية جديدة.',
+            ]);
+        }
+
+        if ($data->expectedCashShiftId !== null && (int) $existing->cash_shift_id !== $data->expectedCashShiftId) {
+            throw ValidationException::withMessages([
+                'shift_id' => 'معرّف العملية مرتبط بورديّة أخرى.',
             ]);
         }
 

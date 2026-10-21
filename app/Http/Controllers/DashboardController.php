@@ -31,6 +31,8 @@ class DashboardController extends Controller
             'canViewPurchases' => OrganizationRole::tryFrom($role)?->canViewPurchases() === true,
             'canUsePos' => OrganizationRole::tryFrom($role)?->canUsePos() === true,
             'canViewSales' => OrganizationRole::tryFrom($role)?->canViewSales() === true,
+            'canViewReports' => $request->user()->can('viewReports', $organization),
+            'canManageExpenses' => $request->user()->can('manageExpenses', $organization),
             'flashMessage' => $request->session()->get('success'),
         ]);
     }
