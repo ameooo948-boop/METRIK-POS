@@ -3,7 +3,10 @@
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\Auth\RegisteredUserController;
 use App\Http\Controllers\Branches\BranchController;
+use App\Http\Controllers\Catalog\CategoryController;
+use App\Http\Controllers\Catalog\ProductController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\Inventory\InventoryAdjustmentController;
 use App\Http\Controllers\Organizations\OrganizationSetupController;
 use App\Http\Controllers\Organizations\SwitchOrganizationController;
 use App\Http\Middleware\ResolveOrganizationContext;
@@ -58,5 +61,20 @@ Route::middleware('auth')->group(function () {
 
         Route::post('/branches/{branch}/switch', [BranchController::class, 'switch'])
             ->name('branches.switch');
+
+        Route::get('/products', [ProductController::class, 'index'])
+            ->name('products.index');
+
+        Route::post('/products', [ProductController::class, 'store'])
+            ->middleware('throttle:60,1')
+            ->name('products.store');
+
+        Route::post('/categories', [CategoryController::class, 'store'])
+            ->middleware('throttle:30,1')
+            ->name('categories.store');
+
+        Route::post('/inventory/adjustments', [InventoryAdjustmentController::class, 'store'])
+            ->middleware('throttle:60,1')
+            ->name('inventory.adjustments.store');
     });
 });

@@ -38,7 +38,8 @@ function switchOrganization(event) {
                     </div>
                 </div>
 
-                <div class="flex items-center gap-3">
+                <div class="flex items-center gap-2">
+                    <Link href="/products" class="rounded-xl border border-emerald-300/30 px-4 py-2 text-sm font-semibold text-emerald-200 transition hover:border-emerald-300/70">المنتجات والمخزون</Link>
                     <Link href="/branches" class="hidden rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold transition hover:border-emerald-300/50 sm:inline-flex">إدارة الفروع</Link>
                     <button @click="logout" class="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold transition hover:border-rose-300/40 hover:text-rose-200">تسجيل الخروج</button>
                 </div>
@@ -77,17 +78,23 @@ function switchOrganization(event) {
                 </article>
             </div>
 
-            <div class="mt-8 grid gap-5 lg:grid-cols-2">
+            <div class="mt-8 grid gap-5 lg:grid-cols-3">
                 <section class="rounded-2xl border border-white/10 bg-slate-900 p-6 sm:p-7">
-                    <h2 class="text-xl font-bold">إعدادات المؤسسة</h2>
-                    <p class="mt-2 leading-7 text-slate-400">تم إنشاء المؤسسة والفرع الرئيسي وربط حسابك بدور مالك المؤسسة عند التسجيل. يمكن إضافة فروع إضافية من شاشة إدارة الفروع.</p>
-                    <Link href="/branches" class="mt-5 inline-flex rounded-xl bg-emerald-300 px-4 py-3 font-bold text-slate-950 hover:bg-emerald-200">{{ props.canManageBranches ? 'إدارة الفروع' : 'عرض فروعك' }}</Link>
+                    <h2 class="text-xl font-bold">إدارة الفروع</h2>
+                    <p class="mt-2 leading-7 text-slate-400">أضف فروع مؤسستك وحدد الفرع الحالي لإدارة بياناته.</p>
+                    <Link href="/branches" class="mt-5 inline-flex rounded-xl border border-white/10 px-4 py-3 font-semibold hover:border-emerald-300/50">{{ props.canManageBranches ? 'إدارة الفروع' : 'عرض فروعك' }}</Link>
+                </section>
+
+                <section class="rounded-2xl border border-white/10 bg-slate-900 p-6 sm:p-7">
+                    <h2 class="text-xl font-bold">المنتجات والمخزون</h2>
+                    <p class="mt-2 leading-7 text-slate-400">أضف المنتجات والتصنيفات والباركود، وسجل حركات المخزون على الفرع الحالي.</p>
+                    <Link href="/products" class="mt-5 inline-flex rounded-xl bg-emerald-300 px-4 py-3 font-bold text-slate-950 hover:bg-emerald-200">فتح المنتجات</Link>
                 </section>
 
                 <section class="rounded-2xl border border-white/10 bg-slate-900 p-6 sm:p-7">
                     <h2 class="text-xl font-bold">تبديل المؤسسة</h2>
-                    <p class="mt-2 leading-7 text-slate-400">لو حسابك عضو في أكثر من مؤسسة، يمكنك اختيار مساحة العمل الحالية. لن يسمح النظام بالتبديل إلى مؤسسة لا تملك عضوية فيها.</p>
-                    <div v-if="props.organizations.length > 1" class="mt-5 flex flex-col gap-3 sm:flex-row">
+                    <p class="mt-2 leading-7 text-slate-400">لن يسمح النظام بالتبديل إلى مؤسسة لا تملك عضوية فيها.</p>
+                    <div v-if="props.organizations.length > 1" class="mt-5 flex flex-col gap-3">
                         <label for="organization-switch" class="sr-only">المؤسسة</label>
                         <select id="organization-switch" :value="props.organization.id" @change="switchOrganization" class="min-w-0 flex-1 rounded-xl border border-white/10 bg-slate-950 px-4 py-3 text-slate-100">
                             <option v-for="org in props.organizations" :key="org.id" :value="org.id">{{ org.name }}</option>

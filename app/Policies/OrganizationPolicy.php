@@ -21,6 +21,27 @@ class OrganizationPolicy
             && OrganizationRole::tryFrom($role)?->canManageBranches() === true;
     }
 
+    public function viewCatalog(User $user, Organization $organization): bool
+    {
+        return $this->view($user, $organization);
+    }
+
+    public function manageCatalog(User $user, Organization $organization): bool
+    {
+        $role = $this->roleFor($user, $organization);
+
+        return $role !== null
+            && OrganizationRole::tryFrom($role)?->canManageCatalog() === true;
+    }
+
+    public function manageInventory(User $user, Organization $organization): bool
+    {
+        $role = $this->roleFor($user, $organization);
+
+        return $role !== null
+            && OrganizationRole::tryFrom($role)?->canManageInventory() === true;
+    }
+
     private function roleFor(User $user, Organization $organization): ?string
     {
         $membership = $user->organizations()

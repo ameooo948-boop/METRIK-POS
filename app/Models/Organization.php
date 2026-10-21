@@ -22,9 +22,7 @@ class Organization extends Model
 
     protected function casts(): array
     {
-        return [
-            'settings' => 'array',
-        ];
+        return ['settings' => 'array'];
     }
 
     public function branches(): HasMany
@@ -37,5 +35,25 @@ class Organization extends Model
         return $this->belongsToMany(User::class)
             ->withPivot(['role', 'is_default'])
             ->withTimestamps();
+    }
+
+    public function categories(): HasMany
+    {
+        return $this->hasMany(Category::class);
+    }
+
+    public function products(): HasMany
+    {
+        return $this->hasMany(Product::class);
+    }
+
+    public function inventoryBalances(): HasMany
+    {
+        return $this->hasMany(InventoryBalance::class);
+    }
+
+    public function inventoryMovements(): HasMany
+    {
+        return $this->hasMany(InventoryMovement::class);
     }
 }
