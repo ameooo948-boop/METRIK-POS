@@ -8,6 +8,7 @@ use App\Http\Controllers\Catalog\ProductController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\Expenses\ExpenseController;
 use App\Http\Controllers\Reports\ReportController;
+use App\Http\Controllers\Reports\ReportExportController;
 use App\Http\Controllers\Inventory\InventoryAdjustmentController;
 use App\Http\Controllers\Organizations\OrganizationSetupController;
 use App\Http\Controllers\Organizations\SwitchOrganizationController;
@@ -67,6 +68,8 @@ Route::middleware('auth')->group(function () {
         Route::get('/sales/{saleId}', [SaleController::class, 'show'])->whereNumber('saleId')->name('sales.show');
 
         Route::get('/reports', [ReportController::class, 'index'])->name('reports.index');
+        Route::post('/reports/exports', [ReportExportController::class, 'store'])->middleware('throttle:10,1')->name('reports.exports.store');
+        Route::get('/reports/exports/{reportExport}/download', [ReportExportController::class, 'download'])->whereNumber('reportExport')->name('reports.exports.download');
         Route::get('/reports/export', [ReportController::class, 'export'])->middleware('throttle:30,1')->name('reports.export');
         Route::get('/expenses', [ExpenseController::class, 'index'])->name('expenses.index');
         Route::post('/expenses', [ExpenseController::class, 'store'])->middleware('throttle:30,1')->name('expenses.store');

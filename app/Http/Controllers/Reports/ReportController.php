@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Reports;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Reports\ReportFilterRequest;
 use App\Models\Organization;
+use App\Models\ReportExport;
 use App\Services\Reports\SalesReport;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 use Inertia\Inertia;
@@ -42,6 +43,25 @@ class ReportController extends Controller
                 : ($branches->firstWhere('id', (int) $request->validated('branch_id'))?->name ?? 'الفرع الحالي'),
             ...$report,
             'canManageExpenses' => $request->user()->can('manageExpenses', $organization),
+            'reportExports' => ReportExport::query()
+                ->forOrganization((int) $organization->getKey())
+                ->where('requested_by', $request->user()->getKey())
+                ->latest('id')
+                ->limit(5)
+                ->get()
+                ->map(static fn (ReportExport $export): array => [
+                    'id' => (int) $export->getKey(),
+                    'status' => $export->status,
+                    'fromDate' => $export->from_date->format('Y-m-d'),
+                    'toDate' => $export->to_date->format('Y-m-d'),
+                    'requestedAt' => $export->created_at?->toDateTimeString(),
+                    'completedAt' => $export->completed_at?->toDateTimeString(),
+                    'failureMessage' => $export->status === 'failed' ? $export->failure_message : null,
+                    'downloadUrl' => $export->status === 'completed'
+                        ? route('reports.exports.download', $export)
+                        : null,
+                ])->values()->all(),
+            'flashMessage' => $request->session()->get('success'),
         ]);
     }
 
