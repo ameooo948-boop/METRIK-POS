@@ -9,6 +9,7 @@ const props = defineProps({
     branches: { type: Array, required: true },
     currentBranch: { type: Object, default: null },
     canManageBranches: { type: Boolean, required: true },
+    canManageTeam: { type: Boolean, required: true },
     canViewPurchases: { type: Boolean, required: true },
     canUsePos: { type: Boolean, required: true },
     canViewSales: { type: Boolean, required: true },
@@ -47,6 +48,7 @@ function switchOrganization(event) {
                     <Link v-if="props.canViewReports" href="/reports" class="hidden rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold hover:border-emerald-300/50 md:inline-flex">التقارير</Link>
                     <Link href="/notifications" class="relative rounded-xl border border-white/10 px-3 py-2 text-sm font-semibold hover:border-emerald-300/50">الإشعارات <span v-if="props.unreadNotificationsCount > 0" class="mr-1 inline-flex min-w-5 items-center justify-center rounded-full bg-emerald-300 px-1.5 py-0.5 text-xs font-black text-slate-950">{{ props.unreadNotificationsCount > 99 ? '99+' : props.unreadNotificationsCount }}</span></Link>
                     <Link href="/branches" class="hidden rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold hover:border-emerald-300/50 sm:inline-flex">الفروع</Link>
+                    <Link v-if="props.canManageTeam" href="/team-members" class="hidden rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold hover:border-emerald-300/50 sm:inline-flex">الفريق</Link>
                     <button @click="logout" class="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold hover:border-rose-300/40 hover:text-rose-200">خروج</button>
                 </div>
             </div>
@@ -75,6 +77,7 @@ function switchOrganization(event) {
                 <Link v-if="props.canManageExpenses" href="/expenses" class="rounded-2xl border border-white/10 bg-slate-900 p-6 transition hover:border-emerald-300/40"><p class="text-sm font-semibold text-emerald-300">الإدارة المالية</p><h2 class="mt-2 text-xl font-bold">مصروفات الفرع</h2><p class="mt-2 text-sm leading-6 text-slate-400">تسجيل مصروفات التشغيل ومراجعة سجلها.</p></Link>
                 <Link href="/notifications" class="rounded-2xl border border-white/10 bg-slate-900 p-6 transition hover:border-emerald-300/40"><p class="text-sm font-semibold text-emerald-300">مركز التنبيهات</p><h2 class="mt-2 text-xl font-bold">الإشعارات والبريد</h2><p class="mt-2 text-sm leading-6 text-slate-400">تابع اكتمال تقارير التصدير والتنبيهات الأخيرة.</p><p class="mt-4 text-sm font-bold text-emerald-200">{{ props.unreadNotificationsCount }} غير مقروء</p></Link>
                 <section class="rounded-2xl border border-white/10 bg-slate-900 p-6"><h2 class="text-xl font-bold">إعدادات المؤسسة</h2><p class="mt-2 leading-7 text-slate-400">تُدار العضويات والفروع حسب صلاحيات حسابك.</p><Link href="/branches" class="mt-4 inline-flex rounded-xl bg-emerald-300 px-4 py-3 font-bold text-slate-950 hover:bg-emerald-200">{{ props.canManageBranches ? 'إدارة الفروع' : 'عرض فروعك' }}</Link></section>
+                <Link v-if="props.canManageTeam" href="/team-members" class="rounded-2xl border border-white/10 bg-slate-900 p-6 transition hover:border-emerald-300/40"><p class="text-sm font-semibold text-emerald-300">المستخدمون والصلاحيات</p><h2 class="mt-2 text-xl font-bold">إدارة فريق العمل</h2><p class="mt-2 text-sm leading-6 text-slate-400">إضافة الموظفين المسجلين، وتحديد الأدوار والفروع المسموح بها.</p></Link>
             </div>
 
             <section class="mt-8 rounded-2xl border border-white/10 bg-slate-900 p-6 sm:p-7">

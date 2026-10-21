@@ -28,6 +28,7 @@ class DashboardController extends Controller
                 ->map(fn ($branch): array => $branch->only(['id', 'name', 'code', 'is_main']))->values(),
             'currentBranch' => $request->attributes->get('currentBranch')?->only(['id', 'name', 'code']),
             'canManageBranches' => OrganizationRole::tryFrom($role)?->canManageBranches() === true,
+            'canManageTeam' => $request->user()->can('manageTeam', $organization),
             'canViewPurchases' => OrganizationRole::tryFrom($role)?->canViewPurchases() === true,
             'canUsePos' => OrganizationRole::tryFrom($role)?->canUsePos() === true,
             'canViewSales' => OrganizationRole::tryFrom($role)?->canViewSales() === true,

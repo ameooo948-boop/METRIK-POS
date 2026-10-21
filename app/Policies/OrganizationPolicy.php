@@ -21,6 +21,19 @@ class OrganizationPolicy
             && OrganizationRole::tryFrom($role)?->canManageBranches() === true;
     }
 
+    public function viewTeam(User $user, Organization $organization): bool
+    {
+        $role = $this->roleFor($user, $organization);
+
+        return $role !== null
+            && OrganizationRole::tryFrom($role)?->canManageTeam() === true;
+    }
+
+    public function manageTeam(User $user, Organization $organization): bool
+    {
+        return $this->viewTeam($user, $organization);
+    }
+
     public function viewCatalog(User $user, Organization $organization): bool
     {
         return $this->view($user, $organization);
