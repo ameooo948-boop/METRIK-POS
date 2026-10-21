@@ -2,6 +2,8 @@
 
 namespace App\Providers;
 
+use App\Contracts\Catalog\ProductRepository;
+use App\Repositories\Eloquent\EloquentProductRepository;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Facades\DB;
@@ -12,7 +14,8 @@ class AppServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
-        // Bind application services here when they need explicit container bindings.
+        // Dependency inversion: application services depend on the contract, not Eloquent.
+        $this->app->bind(ProductRepository::class, EloquentProductRepository::class);
     }
 
     public function boot(): void

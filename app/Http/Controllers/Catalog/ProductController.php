@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Catalog;
 
 use App\Data\Products\CreateProductData;
+use App\Data\Products\ProductCatalogFilters;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Catalog\StoreProductRequest;
 use App\Models\Category;
@@ -10,6 +11,7 @@ use App\Models\Organization;
 use App\Models\Product;
 use App\Models\Unit;
 use App\Services\Catalog\CreateProduct;
+use App\Services\Catalog\ListProducts;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -17,7 +19,7 @@ use Inertia\Response;
 
 class ProductController extends Controller
 {
-    public function index(Request $request): Response|RedirectResponse
+    public function index(Request $request, ListProducts $listProducts): Response|RedirectResponse
     {
         /** @var Organization $organization */
         $organization = $request->attributes->get('currentOrganization');
@@ -28,25 +30,13 @@ class ProductController extends Controller
             return redirect()->route('branches.index')->with('error', 'لا يوجد فرع متاح لهذا الحساب.');
         }
 
-        $search = trim((string) $request->query('search', ''));
-        if (mb_strlen($search) > 100) {
-            $search = mb_substr($search, 0, 100);
-        }
-
-        $products = Product::query()
-            ->forOrganization((int) $organization->getKey())
-            ->with([
-                'category:id,name',
-                'baseUnit:id,code,name_ar,name_en',
-                'barcodes:id,product_id,barcode,unit_id',
-                'inventoryBalances' => fn ($query) => $query
-                    ->where('branch_id', $branch->getKey())
-                    ->select(['id', 'organization_id', 'branch_id', 'product_id', 'quantity']),
-            ])
-            ->search($search)
-            ->orderBy('name')
-            ->paginate(15)
-            ->withQueryString();
+        $filters = ProductCatalogFilters::fromQuery(
+            $request->query(),
+            (int) $organization->getKey(),
+            (int) $branch->getKey(),
+        );
+        $search = $filters->search;
+        $products = $listProducts->handle($filters);
 
         $products->through(static function (Product $product): array {
             return [

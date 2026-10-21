@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\POS;
 
+use App\Contracts\Catalog\ProductRepository;
 use App\Enums\OrganizationRole;
 use App\Http\Controllers\Controller;
 use App\Models\CashShift;
@@ -16,6 +17,10 @@ use Inertia\Response;
 
 class PointOfSaleController extends Controller
 {
+    public function __construct(private readonly ProductRepository $products)
+    {
+    }
+
     public function index(Request $request): Response|RedirectResponse
     {
         /** @var Organization $organization */
@@ -123,18 +128,12 @@ class PointOfSaleController extends Controller
         ]);
 
         $limit = (int) ($validated['limit'] ?? 500);
-        $products = Product::query()
-            ->forOrganization((int) $organization->getKey())
-            ->active()
-            ->where('id', '>', (int) ($validated['after_id'] ?? 0))
-            ->with([
-                'baseUnit:id,name_ar,name_en',
-                'barcodes:id,product_id,barcode',
-                'inventoryBalances' => fn ($query) => $query->where('branch_id', $branch->getKey()),
-            ])
-            ->orderBy('id')
-            ->limit($limit + 1)
-            ->get();
+        $products = $this->products->activeOfflineCatalogPage(
+            (int) $organization->getKey(),
+            (int) $branch->getKey(),
+            (int) ($validated['after_id'] ?? 0),
+            $limit + 1,
+        );
 
         $hasMore = $products->count() > $limit;
         if ($hasMore) {
@@ -167,18 +166,8 @@ class PointOfSaleController extends Controller
     /** @return list<array<string, mixed>> */
     private function searchProductsData(int $organizationId, int $branchId, string $term, int $limit): array
     {
-        return Product::query()
-            ->forOrganization($organizationId)
-            ->active()
-            ->search($term)
-            ->with([
-                'baseUnit:id,name_ar,name_en',
-                'barcodes:id,product_id,barcode',
-                'inventoryBalances' => fn ($query) => $query->where('branch_id', $branchId),
-            ])
-            ->orderBy('name')
-            ->limit($limit)
-            ->get()
+        return $this->products
+            ->searchActiveForBranch($organizationId, $branchId, $term, $limit)
             ->map(static function (Product $product): array {
                 $balance = $product->inventoryBalances->first();
 
