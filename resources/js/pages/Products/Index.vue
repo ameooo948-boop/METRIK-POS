@@ -119,6 +119,7 @@ function formatMoney(value) {
                 <div class="flex items-center gap-2">
                     <Link href="/branches" class="hidden rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold hover:border-emerald-300/60 sm:inline-flex">الفروع</Link>
                     <Link v-if="canManageInventory" href="/inventory/transfers" class="rounded-xl border border-emerald-300/30 px-4 py-2 text-sm font-semibold text-emerald-200 hover:border-emerald-300/60">تحويل المخزون</Link>
+                    <Link v-if="canManageInventory" href="/inventory/counts" class="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold hover:border-emerald-300/60">الجرد الفعلي</Link>
                     <Link href="/dashboard" class="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold hover:border-emerald-300/60">لوحة التحكم</Link>
                 </div>
             </div>

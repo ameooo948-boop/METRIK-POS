@@ -13,6 +13,7 @@ use App\Http\Controllers\Notifications\NotificationController;
 use App\Http\Controllers\Organizations\TeamMemberController;
 use App\Http\Controllers\Inventory\InventoryAdjustmentController;
 use App\Http\Controllers\Inventory\StockTransferController;
+use App\Http\Controllers\Inventory\InventoryStockCountController;
 use App\Http\Controllers\Organizations\OrganizationSetupController;
 use App\Http\Controllers\Organizations\SwitchOrganizationController;
 use App\Http\Controllers\POS\CashShiftController;
@@ -69,6 +70,8 @@ Route::middleware(['auth', SecurityHeaders::class])->group(function () {
         Route::post('/inventory/adjustments', [InventoryAdjustmentController::class, 'store'])->middleware('throttle:60,1')->name('inventory.adjustments.store');
         Route::get('/inventory/transfers', [StockTransferController::class, 'index'])->name('inventory.transfers.index');
         Route::post('/inventory/transfers', [StockTransferController::class, 'store'])->name('inventory.transfers.store');
+        Route::get('/inventory/counts', [InventoryStockCountController::class, 'index'])->name('inventory.stock-counts.index');
+        Route::post('/inventory/counts', [InventoryStockCountController::class, 'store'])->middleware('throttle:30,1,inventory-stock-counts-store')->name('inventory.stock-counts.store');
 
         Route::get('/suppliers', [SupplierController::class, 'index'])->name('suppliers.index');
         Route::post('/suppliers', [SupplierController::class, 'store'])->middleware('throttle:30,1')->name('suppliers.store');
