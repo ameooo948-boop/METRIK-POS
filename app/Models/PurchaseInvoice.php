@@ -15,7 +15,7 @@ class PurchaseInvoice extends Model
 
     protected $fillable = [
         'organization_id', 'branch_id', 'supplier_id', 'created_by', 'invoice_number',
-        'supplier_invoice_number', 'status', 'subtotal', 'total', 'paid_amount', 'due_amount',
+        'supplier_invoice_number', 'status', 'subtotal', 'total', 'paid_amount', 'returned_amount', 'due_amount',
         'notes', 'received_at',
     ];
 
@@ -25,6 +25,7 @@ class PurchaseInvoice extends Model
             'subtotal' => 'decimal:2',
             'total' => 'decimal:2',
             'paid_amount' => 'decimal:2',
+            'returned_amount' => 'decimal:2',
             'due_amount' => 'decimal:2',
             'received_at' => 'datetime',
         ];
@@ -58,6 +59,16 @@ class PurchaseInvoice extends Model
     public function inventoryMovements(): MorphMany
     {
         return $this->morphMany(InventoryMovement::class, 'reference');
+    }
+
+    public function purchaseReturns(): HasMany
+    {
+        return $this->hasMany(PurchaseReturn::class);
+    }
+
+    public function supplierPayments(): HasMany
+    {
+        return $this->hasMany(SupplierPayment::class);
     }
 
     public function scopeForOrganization(Builder $query, int $organizationId): Builder

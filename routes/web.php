@@ -21,6 +21,8 @@ use App\Http\Controllers\POS\SaleCheckoutController;
 use App\Http\Controllers\Sales\SaleController;
 use App\Http\Controllers\Sales\SaleReturnController;
 use App\Http\Controllers\Purchasing\PurchaseInvoiceController;
+use App\Http\Controllers\Purchasing\SupplierPaymentController;
+use App\Http\Controllers\Purchasing\PurchaseReturnController;
 use App\Http\Controllers\Suppliers\SupplierController;
 use App\Http\Middleware\ResolveOrganizationContext;
 use App\Http\Middleware\RequestLogContext;
@@ -68,6 +70,10 @@ Route::middleware('auth')->group(function () {
         Route::post('/suppliers', [SupplierController::class, 'store'])->middleware('throttle:30,1')->name('suppliers.store');
         Route::get('/purchase-invoices', [PurchaseInvoiceController::class, 'index'])->name('purchase-invoices.index');
         Route::post('/purchase-invoices', [PurchaseInvoiceController::class, 'store'])->middleware('throttle:30,1')->name('purchase-invoices.store');
+        Route::get('/supplier-payments', [SupplierPaymentController::class, 'index'])->name('supplier-payments.index');
+        Route::post('/supplier-payments', [SupplierPaymentController::class, 'store'])->middleware('throttle:30,1')->name('supplier-payments.store');
+        Route::get('/purchase-returns', [PurchaseReturnController::class, 'index'])->name('purchase-returns.index');
+        Route::post('/purchase-invoices/{purchaseInvoice}/returns', [PurchaseReturnController::class, 'store'])->whereNumber('purchaseInvoice')->middleware('throttle:30,1')->name('purchase-invoices.returns.store');
 
         Route::get('/pos', [PointOfSaleController::class, 'index'])->name('pos.index');
         Route::get('/pos/products/search', [PointOfSaleController::class, 'searchProducts'])->middleware('throttle:120,1')->name('pos.products.search');
