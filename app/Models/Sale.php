@@ -15,7 +15,7 @@ class Sale extends Model
 
     protected $fillable = [
         'organization_id', 'branch_id', 'cash_shift_id', 'cashier_id', 'invoice_number',
-        'client_operation_uuid', 'status', 'subtotal', 'discount_total', 'tax_total', 'total', 'notes', 'sold_at', 'offline_created_at', 'offline_sync_received_at',
+        'client_operation_uuid', 'status', 'return_status', 'subtotal', 'discount_total', 'tax_total', 'total', 'notes', 'sold_at', 'offline_created_at', 'offline_sync_received_at',
     ];
 
     protected function casts(): array
@@ -35,6 +35,7 @@ class Sale extends Model
     public function payments(): HasMany { return $this->hasMany(SalePayment::class); }
     public function cashMovements(): HasMany { return $this->hasMany(CashMovement::class); }
     public function inventoryMovements(): MorphMany { return $this->morphMany(InventoryMovement::class, 'reference'); }
+    public function returns(): HasMany { return $this->hasMany(SaleReturn::class); }
 
     public function scopeForOrganization(Builder $query, int $organizationId): Builder
     {

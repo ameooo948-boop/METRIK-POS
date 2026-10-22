@@ -19,6 +19,7 @@ use App\Http\Controllers\POS\PointOfSaleController;
 use App\Http\Controllers\POS\OfflineSaleSyncController;
 use App\Http\Controllers\POS\SaleCheckoutController;
 use App\Http\Controllers\Sales\SaleController;
+use App\Http\Controllers\Sales\SaleReturnController;
 use App\Http\Controllers\Purchasing\PurchaseInvoiceController;
 use App\Http\Controllers\Suppliers\SupplierController;
 use App\Http\Middleware\ResolveOrganizationContext;
@@ -77,6 +78,7 @@ Route::middleware('auth')->group(function () {
         Route::post('/pos/checkout', [SaleCheckoutController::class, 'store'])->middleware('throttle:60,1')->name('pos.checkout');
         Route::get('/sales', [SaleController::class, 'index'])->name('sales.index');
         Route::get('/sales/{saleId}', [SaleController::class, 'show'])->whereNumber('saleId')->name('sales.show');
+        Route::post('/sales/{saleId}/returns', [SaleReturnController::class, 'store'])->whereNumber('saleId')->middleware('throttle:30,1')->name('sales.returns.store');
 
         Route::get('/reports', [ReportController::class, 'index'])->name('reports.index');
         Route::post('/reports/exports', [ReportExportController::class, 'store'])->middleware('throttle:10,1')->name('reports.exports.store');

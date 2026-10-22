@@ -6,6 +6,8 @@ use App\Enums\OrganizationRole;
 use App\Http\Controllers\Controller;
 use App\Models\Organization;
 use App\Models\Sale;
+use App\Models\SaleReturnItem;
+use App\Support\DecimalQuantity;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -28,7 +30,7 @@ class SaleController extends Controller
             ->when($role === OrganizationRole::CASHIER, fn ($query) => $query->where('cashier_id', $request->user()->getKey()))
             ->select([
                 'id', 'organization_id', 'branch_id', 'cashier_id',
-                'invoice_number', 'total', 'status', 'sold_at',
+                'invoice_number', 'total', 'status', 'return_status', 'sold_at',
             ])
             ->with('cashier:id,name')
             ->latest('id')
@@ -40,6 +42,7 @@ class SaleController extends Controller
                 'cashierName' => $sale->cashier?->name,
                 'total' => $sale->total,
                 'status' => $sale->status,
+                'returnStatus' => $sale->return_status ?? 'none',
                 'soldAt' => $sale->sold_at?->format('Y-m-d H:i'),
             ]);
 
@@ -66,6 +69,22 @@ class SaleController extends Controller
             ->findOrFail($saleId);
 
         $this->authorize('view', $sale);
+        $sale->load(['returns.items']);
+
+        $returnedQuantities = SaleReturnItem::query()
+            ->where('organization_id', $organization->getKey())
+            ->whereIn('sale_item_id', $sale->items->pluck('id'))
+            ->whereHas('saleReturn', fn ($query) => $query->where('status', 'completed'))
+            ->selectRaw('sale_item_id, COALESCE(SUM(quantity), 0) AS returned_quantity')
+            ->groupBy('sale_item_id')
+            ->pluck('returned_quantity', 'sale_item_id');
+
+        $currentBranch = $request->attributes->get('currentBranch');
+        $canCreateReturn = $currentBranch !== null
+            && (int) $currentBranch->getKey() === (int) $sale->branch_id
+            && $request->user()->can('createReturn', $sale)
+            && $sale->status === 'paid'
+            && ($sale->return_status ?? 'none') !== 'returned';
 
         return Inertia::render('Sales/Show', [
             'organization' => $organization->only(['id', 'name', 'currency']),
@@ -73,6 +92,7 @@ class SaleController extends Controller
                 'id' => $sale->getKey(),
                 'invoiceNumber' => $sale->invoice_number,
                 'status' => $sale->status,
+                'returnStatus' => $sale->return_status ?? 'none',
                 'soldAt' => $sale->sold_at?->format('Y-m-d H:i:s'),
                 'total' => $sale->total,
                 'subtotal' => $sale->subtotal,
@@ -86,6 +106,7 @@ class SaleController extends Controller
                     'name' => $item->product_name_snapshot,
                     'unitName' => $item->unit_name_snapshot,
                     'quantity' => $item->quantity,
+                    'availableQuantity' => DecimalQuantity::fromMilli(max(0, DecimalQuantity::toMilli((string) $item->quantity) - DecimalQuantity::toMilli((string) ($returnedQuantities->get($item->getKey()) ?? '0.000')))),
                     'unitPrice' => $item->unit_price,
                     'lineTotal' => $item->line_total,
                 ])->values(),
@@ -95,7 +116,23 @@ class SaleController extends Controller
                     'amount' => $payment->amount,
                     'reference' => $payment->payment_reference,
                 ])->values(),
+                'returns' => $sale->returns->where('status', 'completed')->sortByDesc('id')->values()->map(static fn ($saleReturn): array => [
+                    'id' => $saleReturn->getKey(),
+                    'number' => $saleReturn->return_number,
+                    'total' => $saleReturn->total,
+                    'refundMethod' => $saleReturn->refund_method,
+                    'refundReference' => $saleReturn->refund_reference,
+                    'reason' => $saleReturn->reason,
+                    'returnedAt' => $saleReturn->returned_at?->format('Y-m-d H:i:s'),
+                    'items' => $saleReturn->items->map(static fn ($item): array => [
+                        'name' => $item->product_name_snapshot,
+                        'quantity' => $item->quantity,
+                        'total' => $item->line_total,
+                        'restocked' => (bool) $item->restock,
+                    ])->values(),
+                ]),
             ],
+            'canCreateReturn' => $canCreateReturn,
         ]);
     }
 }

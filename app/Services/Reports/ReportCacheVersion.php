@@ -27,7 +27,7 @@ class ReportCacheVersion
         $scope = hash('sha256', implode(',', $branchIds));
 
         return sprintf(
-            'metrik-pos:reports:org:%d:v:%d:branches:%s:%s:%s',
+            'metrik-pos:reports:v2:org:%d:v:%d:branches:%s:%s:%s',
             $organizationId,
             $this->version($organizationId),
             $scope,

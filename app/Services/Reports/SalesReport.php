@@ -61,6 +61,27 @@ class SalesReport
             .'COALESCE(SUM(ROUND(sale_items.quantity * sale_items.unit_cost_snapshot, 2)), 0) as cost_of_goods_sold'
         )->first();
 
+        // Recognize return activity on the date the return is processed, even when the original sale was earlier.
+        $returnsBase = DB::table('sale_returns')
+            ->where('organization_id', $organizationId)
+            ->whereIn('branch_id', $branchIds)
+            ->where('status', 'completed')
+            ->whereBetween('returned_at', [$startAt, $endAt]);
+        $returnsStats = (clone $returnsBase)->selectRaw(
+            'COALESCE(SUM(total), 0) as return_total'
+        )->first();
+
+        $returnItemsBase = DB::table('sale_return_items')
+            ->join('sale_returns', 'sale_returns.id', '=', 'sale_return_items.sale_return_id')
+            ->where('sale_return_items.organization_id', $organizationId)
+            ->whereIn('sale_returns.branch_id', $branchIds)
+            ->where('sale_returns.status', 'completed')
+            ->whereBetween('sale_returns.returned_at', [$startAt, $endAt]);
+        $returnCostStats = (clone $returnItemsBase)->selectRaw(
+            'COALESCE(SUM(CASE WHEN sale_return_items.restock = 1 '
+            .'THEN ROUND(sale_return_items.quantity * sale_return_items.unit_cost_snapshot, 2) ELSE 0 END), 0) as returned_cost'
+        )->first();
+
         $expensesBase = Expense::query()
             ->forOrganization($organizationId)
             ->whereIn('branch_id', $branchIds)
@@ -70,8 +91,12 @@ class SalesReport
         $revenueCents = DecimalMoney::toCents((string) ($salesStats->sales_total ?? '0.00'));
         $itemRevenueCents = DecimalMoney::toCents((string) ($itemStats->item_revenue ?? '0.00'));
         $costCents = DecimalMoney::toCents((string) ($itemStats->cost_of_goods_sold ?? '0.00'));
+        $returnCents = DecimalMoney::toCents((string) ($returnsStats->return_total ?? '0.00'));
+        $returnedCostCents = DecimalMoney::toCents((string) ($returnCostStats->returned_cost ?? '0.00'));
+        $netRevenueCents = $revenueCents - $returnCents;
+        $netCostCents = $costCents - $returnedCostCents;
         $expenseCents = DecimalMoney::toCents($expenseTotal);
-        $grossProfitCents = $itemRevenueCents - $costCents;
+        $grossProfitCents = $itemRevenueCents - $returnCents - $costCents + $returnedCostCents;
         $netProfitCents = $grossProfitCents - $expenseCents;
         $invoiceCount = (int) ($salesStats->invoice_count ?? 0);
         $averageCents = $invoiceCount > 0 ? intdiv($revenueCents + intdiv($invoiceCount, 2), $invoiceCount) : 0;
@@ -86,6 +111,16 @@ class SalesReport
             .'COALESCE(SUM(ROUND(sale_items.quantity * sale_items.unit_cost_snapshot, 2)), 0) as cost_total'
         )->groupByRaw('DATE(sales.sold_at)')->get()->keyBy('report_day');
 
+        $dailyReturns = (clone $returnsBase)->selectRaw(
+            'DATE(returned_at) as report_day, COALESCE(SUM(total), 0) as return_total'
+        )->groupByRaw('DATE(returned_at)')->get()->keyBy('report_day');
+
+        $dailyReturnCosts = (clone $returnItemsBase)->selectRaw(
+            'DATE(sale_returns.returned_at) as report_day, '
+            .'COALESCE(SUM(CASE WHEN sale_return_items.restock = 1 '
+            .'THEN ROUND(sale_return_items.quantity * sale_return_items.unit_cost_snapshot, 2) ELSE 0 END), 0) as returned_cost'
+        )->groupByRaw('DATE(sale_returns.returned_at)')->get()->keyBy('report_day');
+
         $dailyExpenses = (clone $expensesBase)->selectRaw(
             'expense_date as report_day, COALESCE(SUM(amount), 0) as expense_total'
         )->groupBy('expense_date')->get()->keyBy('report_day');
@@ -97,17 +132,24 @@ class SalesReport
             $day = $cursor->toDateString();
             $salesRow = $dailySales->get($day);
             $itemsRow = $dailyItems->get($day);
+            $returnRow = $dailyReturns->get($day);
+            $returnCostRow = $dailyReturnCosts->get($day);
             $expenseRow = $dailyExpenses->get($day);
+            $daySalesCents = DecimalMoney::toCents((string) ($salesRow->sales_total ?? '0.00'));
             $dayItemRevenueCents = DecimalMoney::toCents((string) ($itemsRow->item_revenue ?? '0.00'));
             $dayCostCents = DecimalMoney::toCents((string) ($itemsRow->cost_total ?? '0.00'));
+            $dayReturnCents = DecimalMoney::toCents((string) ($returnRow->return_total ?? '0.00'));
+            $dayReturnedCostCents = DecimalMoney::toCents((string) ($returnCostRow->returned_cost ?? '0.00'));
             $dayExpenseCents = DecimalMoney::toCents((string) ($expenseRow->expense_total ?? '0.00'));
-            $dayGrossCents = $dayItemRevenueCents - $dayCostCents;
+            $dayGrossCents = $dayItemRevenueCents - $dayReturnCents - $dayCostCents + $dayReturnedCostCents;
 
             $daily[] = [
                 'date' => $day,
                 'invoices' => (int) ($salesRow->invoice_count ?? 0),
-                'sales' => DecimalMoney::fromCents(DecimalMoney::toCents((string) ($salesRow->sales_total ?? '0.00'))),
-                'costOfGoods' => DecimalMoney::fromCents($dayCostCents),
+                'sales' => DecimalMoney::fromCents($daySalesCents),
+                'returns' => DecimalMoney::fromCents($dayReturnCents),
+                'netSales' => DecimalMoney::fromCents($daySalesCents - $dayReturnCents),
+                'costOfGoods' => DecimalMoney::fromCents($dayCostCents - $dayReturnedCostCents),
                 'grossProfit' => DecimalMoney::fromCents($dayGrossCents),
                 'expenses' => DecimalMoney::fromCents($dayExpenseCents),
                 'netProfit' => DecimalMoney::fromCents($dayGrossCents - $dayExpenseCents),
@@ -162,7 +204,9 @@ class SalesReport
             'summary' => [
                 'invoiceCount' => $invoiceCount,
                 'sales' => DecimalMoney::fromCents($revenueCents),
-                'costOfGoods' => DecimalMoney::fromCents($costCents),
+                'returns' => DecimalMoney::fromCents($returnCents),
+                'netSales' => DecimalMoney::fromCents($netRevenueCents),
+                'costOfGoods' => DecimalMoney::fromCents($netCostCents),
                 'grossProfit' => DecimalMoney::fromCents($grossProfitCents),
                 'expenses' => DecimalMoney::fromCents($expenseCents),
                 'netProfit' => DecimalMoney::fromCents($netProfitCents),
@@ -182,7 +226,7 @@ class SalesReport
         while ($cursor <= $lastDay) {
             $daily[] = [
                 'date' => $cursor->toDateString(), 'invoices' => 0,
-                'sales' => '0.00', 'costOfGoods' => '0.00', 'grossProfit' => '0.00',
+                'sales' => '0.00', 'returns' => '0.00', 'netSales' => '0.00', 'costOfGoods' => '0.00', 'grossProfit' => '0.00',
                 'expenses' => '0.00', 'netProfit' => '0.00',
             ];
             $cursor = $cursor->addDay();
@@ -190,7 +234,7 @@ class SalesReport
 
         return [
             'summary' => [
-                'invoiceCount' => 0, 'sales' => '0.00', 'costOfGoods' => '0.00',
+                'invoiceCount' => 0, 'sales' => '0.00', 'returns' => '0.00', 'netSales' => '0.00', 'costOfGoods' => '0.00',
                 'grossProfit' => '0.00', 'expenses' => '0.00', 'netProfit' => '0.00', 'averageSale' => '0.00',
             ],
             'daily' => $daily,

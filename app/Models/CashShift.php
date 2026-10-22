@@ -47,8 +47,8 @@ class CashShift extends Model
     {
         $movementTotal = $this->movements()
             ->selectRaw(
-                "COALESCE(SUM(CASE WHEN movement_type IN (?, ?) THEN amount WHEN movement_type = ? THEN -amount ELSE 0 END), 0) AS movement_total",
-                ['cash_sale', 'cash_in', 'cash_out'],
+                "COALESCE(SUM(CASE WHEN movement_type IN (?, ?) THEN amount WHEN movement_type IN (?, ?) THEN -amount ELSE 0 END), 0) AS movement_total",
+                ['cash_sale', 'cash_in', 'cash_out', 'cash_return'],
             )
             ->first()?->movement_total ?? '0.00';
 
