@@ -9,6 +9,7 @@ use App\Models\CashShift;
 use App\Models\Customer;
 use App\Models\CustomerAccountTransaction;
 use App\Models\InventoryBalance;
+use App\Models\InventoryLot;
 use App\Models\InventoryMovement;
 use App\Models\Product;
 use App\Models\Sale;
@@ -170,6 +171,52 @@ class CheckoutSale
                         ]);
                     }
 
+                    // Lot-tracked stock is sold FEFO (earliest expiry first). Legacy/untracked
+                    // stock remains sellable, but expired tracked quantities are never available.
+                    $lots = InventoryLot::query()
+                        ->where('organization_id', $data->organizationId)
+                        ->where('branch_id', $branch->getKey())
+                        ->where('product_id', $product->getKey())
+                        ->where('quantity_remaining', '>', 0)
+                        ->orderBy('expires_at')
+                        ->orderBy('id')
+                        ->lockForUpdate()
+                        ->get();
+                    $trackedMilli = 0;
+                    foreach ($lots as $lot) {
+                        $trackedMilli += DecimalQuantity::toMilli((string) $lot->quantity_remaining);
+                    }
+                    if ($trackedMilli > $currentMilli) {
+                        throw ValidationException::withMessages([
+                            'items.'.$index.'.quantity' => 'رصيد التشغيلات المسجل لمنتج «'.$product->name.'» أكبر من رصيد المخزون. أوقف البيع وراجع بيانات التشغيلات.',
+                        ]);
+                    }
+                    $untrackedMilli = $currentMilli - $trackedMilli;
+                    $validLots = $lots->filter(fn (InventoryLot $lot): bool => $lot->expires_at->toDateString() >= now()->toDateString())->values();
+                    $validTrackedMilli = 0;
+                    foreach ($validLots as $lot) {
+                        $validTrackedMilli += DecimalQuantity::toMilli((string) $lot->quantity_remaining);
+                    }
+                    if ($quantityMilli > ($untrackedMilli + $validTrackedMilli)) {
+                        throw ValidationException::withMessages([
+                            'items.'.$index.'.quantity' => 'الكمية المتاحة للبيع من «'.$product->name.'» غير كافية بعد استبعاد التشغيلات منتهية الصلاحية. راجع تواريخ الصلاحية والمخزون.',
+                        ]);
+                    }
+
+                    $remainingToAllocate = min($quantityMilli, $validTrackedMilli);
+                    $lotAllocations = [];
+                    foreach ($validLots as $lot) {
+                        if ($remainingToAllocate <= 0) {
+                            break;
+                        }
+                        $lotMilli = DecimalQuantity::toMilli((string) $lot->quantity_remaining);
+                        $takeMilli = min($remainingToAllocate, $lotMilli);
+                        if ($takeMilli > 0) {
+                            $lotAllocations[] = ['model' => $lot, 'quantity_milli' => $takeMilli];
+                            $remainingToAllocate -= $takeMilli;
+                        }
+                    }
+
                     $newMilli = $currentMilli - $quantityMilli;
                     $balances[(int) $product->getKey()] = ['model' => $balance, 'new_milli' => $newMilli];
                     $subtotalCents += $lineTotalCents;
@@ -179,6 +226,7 @@ class CheckoutSale
                         'unit_price_cents' => $unitPriceCents,
                         'unit_cost_cents' => $unitCostCents,
                         'line_total_cents' => $lineTotalCents,
+                        'lot_allocations' => $lotAllocations,
                     ];
                 }
 
@@ -258,6 +306,15 @@ class CheckoutSale
                             'product_id' => $product->getKey(),
                             'quantity' => DecimalQuantity::fromMilli($newMilli),
                         ]);
+                    }
+
+                    foreach ($item['lot_allocations'] as $allocation) {
+                        /** @var InventoryLot $lot */
+                        $lot = $allocation['model'];
+                        $lot->quantity_remaining = DecimalQuantity::fromMilli(
+                            DecimalQuantity::toMilli((string) $lot->quantity_remaining) - $allocation['quantity_milli']
+                        );
+                        $lot->save();
                     }
 
                     InventoryMovement::query()->create([
