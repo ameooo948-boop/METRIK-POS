@@ -46,7 +46,14 @@ class StoreSaleRequest extends FormRequest
 
         return [
             'client_operation_uuid' => ['required', 'uuid'],
-            'payment_method' => ['required', Rule::in(['cash', 'card', 'mobile_wallet', 'other'])],
+            'payment_method' => ['required', Rule::in(['cash', 'card', 'mobile_wallet', 'other', 'credit'])],
+            'customer_id' => [
+                'nullable', 'required_if:payment_method,credit', 'integer',
+                Rule::exists('customers', 'id')->where(fn ($query) => $query
+                    ->where('organization_id', $organizationId)
+                    ->where('is_active', true)
+                    ->whereNull('deleted_at')),
+            ],
             'notes' => ['nullable', 'string', 'max:1000'],
             'items' => ['required', 'array', 'min:1', 'max:60'],
             'items.*' => ['required', 'array:product_id,quantity'],
@@ -66,6 +73,7 @@ class StoreSaleRequest extends FormRequest
         return [
             'client_operation_uuid' => 'معرّف عملية البيع',
             'payment_method' => 'طريقة الدفع',
+            'customer_id' => 'العميل',
             'items' => 'أصناف الفاتورة',
             'items.*.product_id' => 'المنتج',
             'items.*.quantity' => 'الكمية',

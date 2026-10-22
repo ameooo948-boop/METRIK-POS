@@ -5,7 +5,8 @@ import { Head, Link, useForm } from '@inertiajs/vue3';
 const props = defineProps({ organization: Object, sale: Object, canCreateReturn: Boolean });
 function money(value) { return Number(value ?? 0).toLocaleString('ar-EG', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 function printReceipt() { globalThis.print(); }
-const paymentLabels = { cash: 'نقدي', card: 'بطاقة', mobile_wallet: 'محفظة إلكترونية', other: 'أخرى' };
+const paymentLabels = { cash: 'نقدي', card: 'بطاقة', mobile_wallet: 'محفظة إلكترونية', other: 'أخرى', credit: 'آجل على حساب العميل' };
+const saleStatusLabels = { paid: 'مدفوعة', due: 'آجل — مستحق', partially_paid: 'مدفوعة جزئيًا' };
 const returnStatusLabels = { none: 'لا توجد مرتجعات', partially_returned: 'مرتجع جزئي', returned: 'مرتجع بالكامل' };
 function uuid() {
     if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
@@ -57,12 +58,10 @@ function submitReturn() {
                     </div>
                     <div class="mt-6 grid gap-3 text-sm sm:grid-cols-3">
                         <div><p class="text-slate-500">الفرع</p><p class="mt-1 font-semibold">{{ sale.branch?.name }}</p></div>
-                        <div><p class="text-slate-500">الكاشير</p><p class="mt-1 font-semibold">{{ sale.cashier?.name }}</p></div>
+                        <div><p class="text-slate-500">الكاشير</p><p class="mt-1 font-semibold">{{ sale.cashier?.name }}</p></div><div><p class="text-slate-500">العميل</p><p class="mt-1 font-semibold">{{ sale.customer?.name || 'غير محدد' }}</p><p v-if="sale.customer?.phone" class="mt-1 text-xs text-slate-500">{{ sale.customer.phone }}</p></div>
                         <div><p class="text-slate-500">التاريخ</p><p class="mt-1 font-semibold">{{ sale.soldAt }}</p></div>
                     </div>
-                    <div class="mt-5 inline-flex rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800">
-                        {{ returnStatusLabels[sale.returnStatus] || returnStatusLabels.none }}
-                    </div>
+                    <div class="mt-5 flex flex-wrap gap-2"><span class="inline-flex rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800">{{ returnStatusLabels[sale.returnStatus] || returnStatusLabels.none }}</span><span class="inline-flex rounded-full bg-slate-200 px-3 py-1 text-xs font-semibold text-slate-800">{{ saleStatusLabels[sale.status] || sale.status }}</span></div>
                 </header>
                 <div class="p-6 sm:p-8">
                     <div class="overflow-x-auto">
@@ -77,6 +76,7 @@ function submitReturn() {
                         <div class="flex justify-between gap-3"><span class="text-slate-500">الضريبة</span><span>{{ money(sale.taxTotal) }} ج.م</span></div>
                         <div class="flex justify-between gap-3 border-t border-slate-200 pt-4 text-lg font-black"><span>إجمالي الفاتورة الأصلية</span><span>{{ money(sale.total) }} ج.م</span></div>
                     </div>
+                    <div v-if="sale.customer && ['due', 'partially_paid'].includes(sale.status)" class="mt-6 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"><p class="font-bold">فاتورة على حساب العميل</p><p class="mt-1">يمكن مراجعة الرصيد وتسجيل التحصيل من <a :href="`/customers/${sale.customer.id}`" class="font-semibold underline">حساب العميل</a>.</p></div>
                     <div class="mt-8 rounded-xl bg-slate-50 p-4"><p class="font-bold">طرق الدفع الأصلية</p><div v-for="payment in sale.payments" :key="payment.id" class="mt-2 flex justify-between gap-3 text-sm"><span>{{ paymentLabels[payment.method] || payment.method }}</span><span class="font-semibold">{{ money(payment.amount) }} ج.م</span></div></div>
                     <p class="mt-8 text-center text-xs text-slate-500">شكرًا لتعاملكم معنا</p>
                 </div>

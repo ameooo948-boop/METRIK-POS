@@ -23,6 +23,7 @@ const props = defineProps({
     offlineContext: { type: Object, required: true },
     shift: { type: Object, default: null },
     initialProducts: { type: Array, required: true },
+    initialCustomers: { type: Array, required: true },
     recentSales: { type: Array, required: true },
     canViewSales: { type: Boolean, required: true },
     flashMessage: { type: String, default: null },
@@ -31,6 +32,10 @@ const props = defineProps({
 
 const searchQuery = ref('');
 const products = ref(props.initialProducts);
+const customers = ref(props.initialCustomers);
+const customerSearchQuery = ref('');
+const isSearchingCustomers = ref(false);
+const customerSearchError = ref('');
 const cart = ref([]);
 const isSearching = ref(false);
 const searchError = ref('');
@@ -57,6 +62,7 @@ watch(() => props.shift?.expectedCash, (value) => {
 const checkoutForm = useForm({
     client_operation_uuid: createOperationUuid(),
     payment_method: 'cash',
+    customer_id: null,
     notes: '',
     items: [],
 });
@@ -160,6 +166,33 @@ async function searchProducts() {
     }
 }
 
+async function findCustomers() {
+    const term = customerSearchQuery.value.trim();
+    customerSearchError.value = '';
+    if (!isConnected.value) {
+        const lower = term.toLocaleLowerCase('ar');
+        customers.value = props.initialCustomers.filter((customer) => {
+            const values = [customer.name, customer.phone, customer.code];
+            return !lower || values.some((value) => String(value || '').toLocaleLowerCase('ar').includes(lower));
+        });
+        if (term && !customers.value.length) customerSearchError.value = 'البحث دون اتصال يقتصر على قائمة العملاء المحفوظة عند فتح نقطة البيع.';
+        return;
+    }
+    isSearchingCustomers.value = true;
+    try {
+        const response = await axios.get('/pos/customers/search', { params: { q: term } });
+        customers.value = response.data.data;
+        serverReachable.value = true;
+    } catch (error) {
+        if (!error?.response) serverReachable.value = false;
+        customerSearchError.value = error?.response?.status === 429
+            ? 'طلبات البحث كثيرة. انتظر قليلًا ثم حاول مرة أخرى.'
+            : 'تعذر البحث عن العملاء. حاول مرة أخرى.';
+    } finally {
+        isSearchingCustomers.value = false;
+    }
+}
+
 function addToCart(product) {
     if (!props.shift || Number(product.stock) <= 0) return;
     const existing = cart.value.find((line) => Number(line.product.id) === Number(product.id));
@@ -246,6 +279,7 @@ async function queueOfflineCheckout() {
         catalogScopeKey: context.catalogScopeKey,
         context,
         payment_method: 'cash',
+        customer_id: checkoutForm.customer_id ? Number(checkoutForm.customer_id) : null,
         notes: checkoutForm.notes || 'بيع محفوظ محليًا دون اتصال',
         items,
         offline_created_at: createdAt,
@@ -255,6 +289,7 @@ async function queueOfflineCheckout() {
 
     cart.value = [];
     checkoutForm.reset('notes');
+    checkoutForm.customer_id = null;
     checkoutForm.items = [];
     checkoutForm.client_operation_uuid = createOperationUuid();
     await saveOfflineCart(context.saleScopeKey, []);
@@ -295,6 +330,7 @@ async function checkout() {
         onSuccess: () => {
             cart.value = [];
             checkoutForm.reset('notes');
+            checkoutForm.customer_id = null;
             checkoutForm.items = [];
             checkoutForm.client_operation_uuid = createOperationUuid();
             offlineStatusMessage.value = '';
@@ -530,10 +566,17 @@ onBeforeUnmount(() => {
                     <div v-for="(line, index) in cart" :key="`error-${line.product.id}`"><p v-if="checkoutForm.errors[`items.${index}.quantity`]" class="text-sm text-rose-300">{{ line.product.name }}: {{ checkoutForm.errors[`items.${index}.quantity`] }}</p></div>
                     <div class="space-y-3 border-t border-white/10 pt-5">
                         <div class="flex items-center justify-between gap-4 text-slate-400"><span>عدد الأصناف</span><span>{{ cart.length }}</span></div><div class="flex items-center justify-between gap-4 text-xl font-black"><span>الإجمالي</span><span class="text-emerald-200">{{ money(estimatedTotal) }} ج.م</span></div>
-                        <div><label for="payment-method" class="mb-2 block text-sm font-medium">طريقة الدفع</label><select id="payment-method" v-model="checkoutForm.payment_method" class="w-full rounded-xl border border-white/10 bg-slate-950 px-4 py-3 outline-none focus:border-emerald-300"><option value="cash">نقدي</option><option value="card">بطاقة</option><option value="mobile_wallet">محفظة إلكترونية</option><option value="other">أخرى</option></select><p v-if="checkoutForm.errors.payment_method" class="mt-1 text-sm text-rose-300">{{ checkoutForm.errors.payment_method }}</p></div>
+                        <div class="space-y-2 rounded-xl border border-white/10 bg-slate-950/50 p-3">
+                            <label for="customer-search" class="block text-sm font-medium">ربط الفاتورة بعميل (اختياري)</label>
+                            <div class="flex gap-2"><input id="customer-search" v-model="customerSearchQuery" maxlength="100" @keydown.enter.prevent="findCustomers" class="min-w-0 flex-1 rounded-lg border border-white/10 bg-slate-950 px-3 py-2.5 outline-none focus:border-emerald-300" placeholder="اسم العميل أو الهاتف أو الكود" /><button type="button" @click="findCustomers" :disabled="isSearchingCustomers" class="rounded-lg border border-white/10 px-3 py-2 text-sm disabled:opacity-50">{{ isSearchingCustomers ? 'بحث...' : 'بحث' }}</button></div>
+                            <select v-model="checkoutForm.customer_id" class="w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-3 outline-none focus:border-emerald-300"><option :value="null">بدون عميل</option><option v-for="customer in customers" :key="customer.id" :value="customer.id">{{ customer.name }}{{ customer.phone ? ` · ${customer.phone}` : '' }}{{ customer.code ? ` · ${customer.code}` : '' }}</option></select>
+                            <p v-if="customerSearchError" class="text-xs text-amber-200" role="status">{{ customerSearchError }}</p>
+                            <p v-if="checkoutForm.errors.customer_id" class="text-sm text-rose-300" role="alert">{{ checkoutForm.errors.customer_id }}</p>
+                        </div>
+                        <div><label for="payment-method" class="mb-2 block text-sm font-medium">طريقة الدفع</label><select id="payment-method" v-model="checkoutForm.payment_method" class="w-full rounded-xl border border-white/10 bg-slate-950 px-4 py-3 outline-none focus:border-emerald-300"><option value="cash">نقدي</option><option value="card">بطاقة</option><option value="mobile_wallet">محفظة إلكترونية</option><option value="other">أخرى</option><option value="credit">آجل على حساب العميل</option></select><p v-if="checkoutForm.errors.payment_method" class="mt-1 text-sm text-rose-300">{{ checkoutForm.errors.payment_method }}</p></div>
                         <div><label for="sale-notes" class="mb-2 block text-sm font-medium">ملاحظة (اختياري)</label><input id="sale-notes" v-model="checkoutForm.notes" maxlength="1000" class="w-full rounded-xl border border-white/10 bg-slate-950 px-4 py-3 outline-none focus:border-emerald-300" placeholder="ملاحظة داخلية" /></div>
                         <button type="button" :disabled="!shift || !cart.length || checkoutForm.processing" @click="checkout" class="w-full rounded-xl bg-emerald-300 px-5 py-4 font-black text-slate-950 disabled:cursor-not-allowed disabled:opacity-40">{{ checkoutForm.processing ? 'جارٍ تسجيل البيع...' : (!isConnected ? `حفظ البيع محليًا · ${money(estimatedTotal)} ج.م` : `تأكيد البيع · ${money(estimatedTotal)} ج.م`) }}</button>
-                        <p class="text-xs leading-5 text-slate-500">السعر والمخزون والإجمالي يُعاد التحقق منهم على الخادم. دون اتصال، تُحفظ المبيعات النقدية في الجهاز فقط، ولا تصدر فاتورة مركزية إلا بعد المزامنة. قد تحتاج العملية مراجعة إذا تغير السعر أو لم يكفِ المخزون.</p>
+                        <p v-if="checkoutForm.payment_method === 'credit'" class="text-xs leading-5 text-amber-200">البيع الآجل يتطلب اختيار عميل نشط وحدًا ائتمانيًا كافيًا. البيع الآجل غير متاح عند انقطاع الإنترنت.</p><p class="text-xs leading-5 text-slate-500">السعر والمخزون والإجمالي يُعاد التحقق منهم على الخادم. دون اتصال، تُحفظ المبيعات النقدية في الجهاز فقط، ولا تصدر فاتورة مركزية إلا بعد المزامنة. قد تحتاج العملية مراجعة إذا تغير السعر أو لم يكفِ المخزون.</p>
                     </div>
                 </section>
             </div>

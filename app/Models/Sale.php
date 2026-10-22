@@ -14,7 +14,7 @@ class Sale extends Model
     use HasFactory;
 
     protected $fillable = [
-        'organization_id', 'branch_id', 'cash_shift_id', 'cashier_id', 'invoice_number',
+        'organization_id', 'branch_id', 'cash_shift_id', 'cashier_id', 'customer_id', 'invoice_number',
         'client_operation_uuid', 'status', 'return_status', 'subtotal', 'discount_total', 'tax_total', 'total', 'notes', 'sold_at', 'offline_created_at', 'offline_sync_received_at',
     ];
 
@@ -31,6 +31,7 @@ class Sale extends Model
     public function branch(): BelongsTo { return $this->belongsTo(Branch::class); }
     public function cashShift(): BelongsTo { return $this->belongsTo(CashShift::class); }
     public function cashier(): BelongsTo { return $this->belongsTo(User::class, 'cashier_id'); }
+    public function customer(): BelongsTo { return $this->belongsTo(Customer::class); }
     public function items(): HasMany { return $this->hasMany(SaleItem::class); }
     public function payments(): HasMany { return $this->hasMany(SalePayment::class); }
     public function cashMovements(): HasMany { return $this->hasMany(CashMovement::class); }

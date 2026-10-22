@@ -29,10 +29,10 @@ class SaleController extends Controller
             ->where('branch_id', $branch->getKey())
             ->when($role === OrganizationRole::CASHIER, fn ($query) => $query->where('cashier_id', $request->user()->getKey()))
             ->select([
-                'id', 'organization_id', 'branch_id', 'cashier_id',
+                'id', 'organization_id', 'branch_id', 'cashier_id', 'customer_id',
                 'invoice_number', 'total', 'status', 'return_status', 'sold_at',
             ])
-            ->with('cashier:id,name')
+            ->with(['cashier:id,name', 'customer:id,name,phone'])
             ->latest('id')
             ->paginate(20)
             ->withQueryString()
@@ -40,6 +40,7 @@ class SaleController extends Controller
                 'id' => $sale->getKey(),
                 'invoiceNumber' => $sale->invoice_number,
                 'cashierName' => $sale->cashier?->name,
+                'customerName' => $sale->customer?->name,
                 'total' => $sale->total,
                 'status' => $sale->status,
                 'returnStatus' => $sale->return_status ?? 'none',
@@ -63,6 +64,7 @@ class SaleController extends Controller
             ->with([
                 'branch:id,name,code',
                 'cashier:id,name',
+                'customer:id,name,phone',
                 'items:id,organization_id,sale_id,product_id,product_sku_snapshot,product_name_snapshot,unit_name_snapshot,quantity,unit_price,unit_cost_snapshot,line_total',
                 'payments:id,organization_id,sale_id,payment_method,amount,payment_reference',
             ])
@@ -100,6 +102,7 @@ class SaleController extends Controller
                 'taxTotal' => $sale->tax_total,
                 'branch' => $sale->branch?->only(['id', 'name', 'code']),
                 'cashier' => $sale->cashier?->only(['id', 'name']),
+                'customer' => $sale->customer?->only(['id', 'name', 'phone']),
                 'items' => $sale->items->map(static fn ($item): array => [
                     'id' => $item->getKey(),
                     'sku' => $item->product_sku_snapshot,

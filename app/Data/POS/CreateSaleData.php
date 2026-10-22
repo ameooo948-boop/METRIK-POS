@@ -15,6 +15,7 @@ final readonly class CreateSaleData
         public array $items,
         public ?int $expectedCashShiftId = null,
         public ?string $offlineCreatedAt = null,
+        public ?int $customerId = null,
     ) {}
 
     /** @param array<string, mixed> $data */
@@ -47,6 +48,7 @@ final readonly class CreateSaleData
             }, $data['items']),
             expectedCashShiftId: $expectedCashShiftId,
             offlineCreatedAt: $offlineCreatedAt,
+            customerId: isset($data['customer_id']) && $data['customer_id'] !== '' ? (int) $data['customer_id'] : null,
         );
     }
 }

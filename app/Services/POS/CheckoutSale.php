@@ -3,10 +3,11 @@
 namespace App\Services\POS;
 
 use App\Data\POS\CreateSaleData;
-use App\Events\OperationalReportDataChanged;
 use App\Models\Branch;
 use App\Models\CashMovement;
 use App\Models\CashShift;
+use App\Models\Customer;
+use App\Models\CustomerAccountTransaction;
 use App\Models\InventoryBalance;
 use App\Models\InventoryMovement;
 use App\Models\Product;
@@ -26,7 +27,7 @@ class CheckoutSale
     public function handle(CreateSaleData $data): Sale
     {
         try {
-            $sale = DB::transaction(function () use ($data): Sale {
+            return DB::transaction(function () use ($data): Sale {
                 $existing = $this->existingSale($data, lock: true);
                 if ($existing) {
                     return $existing->load(['items', 'payments', 'branch', 'cashier']);
@@ -74,6 +75,29 @@ class CheckoutSale
                 $existing = $this->existingSale($data, lock: true);
                 if ($existing) {
                     return $existing->load(['items', 'payments', 'branch', 'cashier']);
+                }
+
+                $customer = null;
+                if ($data->customerId !== null) {
+                    $customer = Customer::query()
+                        ->forOrganization($data->organizationId)
+                        ->active()
+                        ->whereKey($data->customerId)
+                        ->lockForUpdate()
+                        ->first();
+
+                    if (! $customer) {
+                        throw ValidationException::withMessages([
+                            'customer_id' => 'العميل غير موجود أو غير نشط في المؤسسة الحالية.',
+                        ]);
+                    }
+                }
+
+                $isCreditSale = $data->paymentMethod === 'credit';
+                if ($isCreditSale && ! $customer) {
+                    throw ValidationException::withMessages([
+                        'customer_id' => 'اختيار عميل نشط مطلوب للبيع الآجل.',
+                    ]);
                 }
 
                 $productIds = array_values(array_unique(array_map(
@@ -164,14 +188,28 @@ class CheckoutSale
                     ]);
                 }
 
+                $customerBalanceAfterCents = null;
+                if ($isCreditSale && $customer) {
+                    $currentCustomerBalanceCents = DecimalMoney::toCents((string) $customer->balance);
+                    $customerCreditLimitCents = DecimalMoney::toCents((string) $customer->credit_limit);
+                    $customerBalanceAfterCents = $currentCustomerBalanceCents + $subtotalCents;
+
+                    if ($customerCreditLimitCents <= 0 || $customerBalanceAfterCents > $customerCreditLimitCents) {
+                        throw ValidationException::withMessages([
+                            'customer_id' => 'الفاتورة ستتجاوز الحد الائتماني المتاح للعميل. راجع رصيده وحده الائتماني.',
+                        ]);
+                    }
+                }
+
                 $sale = Sale::query()->create([
                     'organization_id' => $data->organizationId,
                     'branch_id' => $branch->getKey(),
                     'cash_shift_id' => $shift->getKey(),
                     'cashier_id' => $data->cashierId,
+                    'customer_id' => $customer?->getKey(),
                     'invoice_number' => 'POS-'.now()->format('Ymd').'-'.Str::upper((string) Str::ulid()),
                     'client_operation_uuid' => $data->clientOperationUuid,
-                    'status' => 'paid',
+                    'status' => $isCreditSale ? 'due' : 'paid',
                     'subtotal' => DecimalMoney::fromCents($subtotalCents),
                     'discount_total' => '0.00',
                     'tax_total' => '0.00',
@@ -238,12 +276,30 @@ class CheckoutSale
                 }
 
                 $total = DecimalMoney::fromCents($subtotalCents);
-                SalePayment::query()->create([
-                    'organization_id' => $data->organizationId,
-                    'sale_id' => $sale->getKey(),
-                    'payment_method' => $data->paymentMethod,
-                    'amount' => $total,
-                ]);
+                if ($isCreditSale && $customer && $customerBalanceAfterCents !== null) {
+                    CustomerAccountTransaction::query()->create([
+                        'organization_id' => $data->organizationId,
+                        'branch_id' => $branch->getKey(),
+                        'customer_id' => $customer->getKey(),
+                        'sale_id' => $sale->getKey(),
+                        'created_by' => $data->cashierId,
+                        'transaction_type' => 'sale',
+                        'debit_amount' => $total,
+                        'credit_amount' => '0.00',
+                        'balance_after' => DecimalMoney::fromCents($customerBalanceAfterCents),
+                        'payment_method' => 'credit',
+                        'reference' => $sale->invoice_number,
+                        'description' => 'فاتورة بيع آجل '.$sale->invoice_number,
+                    ]);
+                    $customer->forceFill(['balance' => DecimalMoney::fromCents($customerBalanceAfterCents)])->save();
+                } else {
+                    SalePayment::query()->create([
+                        'organization_id' => $data->organizationId,
+                        'sale_id' => $sale->getKey(),
+                        'payment_method' => $data->paymentMethod,
+                        'amount' => $total,
+                    ]);
+                }
 
                 if ($data->paymentMethod === 'cash') {
                     CashMovement::query()->create([
@@ -260,10 +316,6 @@ class CheckoutSale
 
                 return $sale->load(['items', 'payments', 'branch', 'cashier']);
             }, attempts: 3);
-
-            event(new OperationalReportDataChanged($data->organizationId));
-
-            return $sale;
         } catch (QueryException $exception) {
             // Concurrent duplicate submissions may race on the database unique key.
             $existing = $this->existingSale($data, lock: false);
@@ -314,8 +366,14 @@ class CheckoutSale
         }
         ksort($savedItems, SORT_NUMERIC);
 
-        $savedPaymentMethod = $existing->payments->first()?->payment_method;
-        if ($requestedItems !== $savedItems || $savedPaymentMethod !== $data->paymentMethod) {
+        $wasCreditSale = CustomerAccountTransaction::query()
+            ->where('organization_id', $data->organizationId)
+            ->where('sale_id', $existing->getKey())
+            ->where('transaction_type', 'sale')
+            ->exists();
+        $savedPaymentMethod = $wasCreditSale ? 'credit' : $existing->payments->first()?->payment_method;
+        if ($requestedItems !== $savedItems || $savedPaymentMethod !== $data->paymentMethod
+            || (int) ($existing->customer_id ?? 0) !== (int) ($data->customerId ?? 0)) {
             throw ValidationException::withMessages([
                 'client_operation_uuid' => 'تم استخدام معرّف العملية سابقًا مع سلة أو طريقة دفع مختلفة. أعد المحاولة بمعرّف جديد.',
             ]);

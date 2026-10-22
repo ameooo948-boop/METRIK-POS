@@ -5,6 +5,7 @@ use App\Http\Controllers\Auth\RegisteredUserController;
 use App\Http\Controllers\Branches\BranchController;
 use App\Http\Controllers\Catalog\CategoryController;
 use App\Http\Controllers\Catalog\ProductController;
+use App\Http\Controllers\Customers\CustomerController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\Expenses\ExpenseController;
 use App\Http\Controllers\Reports\ReportController;
@@ -87,6 +88,7 @@ Route::middleware(['auth', SecurityHeaders::class])->group(function () {
 
         Route::get('/pos', [PointOfSaleController::class, 'index'])->name('pos.index');
         Route::get('/pos/products/search', [PointOfSaleController::class, 'searchProducts'])->middleware('throttle:120,1')->name('pos.products.search');
+        Route::get('/pos/customers/search', [PointOfSaleController::class, 'searchCustomers'])->middleware('throttle:60,1,pos-customer-search')->name('pos.customers.search');
         Route::get('/pos/offline/catalog', [PointOfSaleController::class, 'offlineCatalog'])->middleware('throttle:30,1')->name('pos.offline.catalog');
         Route::post('/pos/offline/sync', OfflineSaleSyncController::class)->middleware('throttle:60,1')->name('pos.offline.sync');
         Route::post('/pos/shifts', [CashShiftController::class, 'open'])->middleware('throttle:20,1')->name('pos.shifts.open');
@@ -95,6 +97,12 @@ Route::middleware(['auth', SecurityHeaders::class])->group(function () {
         Route::get('/sales', [SaleController::class, 'index'])->name('sales.index');
         Route::get('/sales/{saleId}', [SaleController::class, 'show'])->whereNumber('saleId')->name('sales.show');
         Route::post('/sales/{saleId}/returns', [SaleReturnController::class, 'store'])->whereNumber('saleId')->middleware('throttle:30,1')->name('sales.returns.store');
+
+        Route::get('/customers', [CustomerController::class, 'index'])->name('customers.index');
+        Route::post('/customers', [CustomerController::class, 'store'])->middleware('throttle:30,1,customers-store')->name('customers.store');
+        Route::get('/customers/{customerId}', [CustomerController::class, 'show'])->whereNumber('customerId')->name('customers.show');
+        Route::patch('/customers/{customerId}', [CustomerController::class, 'update'])->whereNumber('customerId')->middleware('throttle:30,1,customers-update')->name('customers.update');
+        Route::post('/customers/{customerId}/payments', [CustomerController::class, 'collectPayment'])->whereNumber('customerId')->middleware('throttle:30,1,customer-account-payment')->name('customers.payments.store');
 
         Route::get('/reports', [ReportController::class, 'index'])->name('reports.index');
         Route::post('/reports/exports', [ReportExportController::class, 'store'])->middleware('throttle:10,1')->name('reports.exports.store');

@@ -13,6 +13,7 @@ const props = defineProps({
     canViewPurchases: { type: Boolean, required: true },
     canUsePos: { type: Boolean, required: true },
     canViewSales: { type: Boolean, required: true },
+    canViewCustomers: { type: Boolean, required: true },
     canViewReports: { type: Boolean, required: true },
     canManageExpenses: { type: Boolean, required: true },
     unreadNotificationsCount: { type: Number, default: 0 },
@@ -43,6 +44,7 @@ function switchOrganization(event) {
                 <div class="flex items-center gap-2">
                     <Link v-if="props.canUsePos" href="/pos" class="hidden rounded-xl border border-emerald-300/30 px-4 py-2 text-sm font-semibold text-emerald-200 hover:border-emerald-300/60 sm:inline-flex">نقطة البيع</Link>
                     <Link href="/products" class="hidden rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold hover:border-emerald-300/50 sm:inline-flex">المنتجات</Link>
+                    <Link v-if="props.canViewCustomers" href="/customers" class="hidden rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold hover:border-emerald-300/50 md:inline-flex">العملاء</Link>
                     <Link v-if="props.canViewPurchases" href="/suppliers" class="hidden rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold hover:border-emerald-300/50 md:inline-flex">الموردون</Link>
                     <Link v-if="props.canViewPurchases" href="/purchase-invoices" class="hidden rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold hover:border-emerald-300/50 lg:inline-flex">المشتريات</Link>
                     <Link v-if="props.canViewReports" href="/reports" class="hidden rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold hover:border-emerald-300/50 md:inline-flex">التقارير</Link>
@@ -70,6 +72,7 @@ function switchOrganization(event) {
             <div class="mt-8 grid gap-5 md:grid-cols-2 xl:grid-cols-3">
                 <Link v-if="props.canUsePos" href="/pos" class="rounded-2xl border border-emerald-300/30 bg-slate-900 p-6 transition hover:border-emerald-300/60"><p class="text-sm font-semibold text-emerald-300">المبيعات</p><h2 class="mt-2 text-xl font-bold">نقطة البيع POS</h2><p class="mt-2 text-sm leading-6 text-slate-400">فتح وردية، البحث عن الأصناف، وتسجيل المبيعات.</p></Link>
                 <Link v-if="props.canViewSales" href="/sales" class="rounded-2xl border border-white/10 bg-slate-900 p-6 transition hover:border-emerald-300/40"><p class="text-sm font-semibold text-emerald-300">سجل العمليات</p><h2 class="mt-2 text-xl font-bold">فواتير البيع</h2><p class="mt-2 text-sm leading-6 text-slate-400">مراجعة الفواتير المسجلة في الفرع الحالي.</p></Link>
+                <Link v-if="props.canViewCustomers" href="/customers" class="rounded-2xl border border-white/10 bg-slate-900 p-6 transition hover:border-emerald-300/40"><p class="text-sm font-semibold text-emerald-300">علاقات العملاء</p><h2 class="mt-2 text-xl font-bold">العملاء والحسابات</h2><p class="mt-2 text-sm leading-6 text-slate-400">سجل مشتريات العملاء، حدود الائتمان، الأرصدة والتحصيلات.</p></Link>
                 <Link href="/products" class="rounded-2xl border border-white/10 bg-slate-900 p-6 transition hover:border-emerald-300/40"><p class="text-sm font-semibold text-emerald-300">الكتالوج</p><h2 class="mt-2 text-xl font-bold">المنتجات والمخزون</h2><p class="mt-2 text-sm leading-6 text-slate-400">إدارة الأصناف والباركود وأرصدة الفرع.</p></Link>
                 <Link v-if="props.canViewPurchases" href="/suppliers" class="rounded-2xl border border-white/10 bg-slate-900 p-6 transition hover:border-emerald-300/40"><p class="text-sm font-semibold text-emerald-300">الموردون</p><h2 class="mt-2 text-xl font-bold">دليل الموردين</h2><p class="mt-2 text-sm leading-6 text-slate-400">بيانات الموردين ورصيد كل مورد من الفواتير المسجلة.</p></Link>
                 <Link v-if="props.canViewPurchases" href="/purchase-invoices" class="rounded-2xl border border-white/10 bg-slate-900 p-6 transition hover:border-emerald-300/40"><p class="text-sm font-semibold text-emerald-300">المشتريات</p><h2 class="mt-2 text-xl font-bold">فواتير الشراء والاستلام</h2><p class="mt-2 text-sm leading-6 text-slate-400">استلام بضاعة وتحديث المخزون وتسجيل المدفوع والمتبقي.</p></Link>

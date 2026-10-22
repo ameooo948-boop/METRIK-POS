@@ -42,7 +42,7 @@ class SalesReport
         $sales = Sale::query()
             ->forOrganization($organizationId)
             ->whereIn('branch_id', $branchIds)
-            ->where('status', 'paid')
+            ->whereIn('status', ['paid', 'due', 'partially_paid'])
             ->whereBetween('sold_at', [$startAt, $endAt]);
 
         $salesStats = (clone $sales)->selectRaw(
@@ -53,7 +53,7 @@ class SalesReport
             ->join('sales', 'sales.id', '=', 'sale_items.sale_id')
             ->where('sale_items.organization_id', $organizationId)
             ->whereIn('sales.branch_id', $branchIds)
-            ->where('sales.status', 'paid')
+            ->whereIn('sales.status', ['paid', 'due', 'partially_paid'])
             ->whereBetween('sales.sold_at', [$startAt, $endAt]);
 
         $itemStats = (clone $itemsBase)->selectRaw(
@@ -183,7 +183,7 @@ class SalesReport
             ->join('sales', 'sales.id', '=', 'sale_payments.sale_id')
             ->where('sale_payments.organization_id', $organizationId)
             ->whereIn('sales.branch_id', $branchIds)
-            ->where('sales.status', 'paid')
+            ->whereIn('sales.status', ['paid', 'due', 'partially_paid'])
             ->whereBetween('sales.sold_at', [$startAt, $endAt])
             ->selectRaw('sale_payments.payment_method as method, COALESCE(SUM(sale_payments.amount), 0) as total')
             ->groupBy('sale_payments.payment_method')

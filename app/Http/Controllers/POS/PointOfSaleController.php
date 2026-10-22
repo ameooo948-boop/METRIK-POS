@@ -2,10 +2,10 @@
 
 namespace App\Http\Controllers\POS;
 
-use App\Contracts\Catalog\ProductRepository;
 use App\Enums\OrganizationRole;
 use App\Http\Controllers\Controller;
 use App\Models\CashShift;
+use App\Models\Customer;
 use App\Models\Organization;
 use App\Models\Product;
 use App\Models\Sale;
@@ -17,10 +17,6 @@ use Inertia\Response;
 
 class PointOfSaleController extends Controller
 {
-    public function __construct(private readonly ProductRepository $products)
-    {
-    }
-
     public function index(Request $request): Response|RedirectResponse
     {
         /** @var Organization $organization */
@@ -61,6 +57,14 @@ class PointOfSaleController extends Controller
                 'cashierName' => $sale->cashier?->name,
             ])->values();
 
+        $initialCustomers = Customer::query()->forOrganization((int) $organization->getKey())->active()
+            ->select(['id', 'organization_id', 'name', 'phone', 'code'])
+            ->orderBy('name')->limit(60)->get()
+            ->map(static fn (Customer $customer): array => [
+                'id' => (int) $customer->getKey(), 'name' => $customer->name,
+                'phone' => $customer->phone, 'code' => $customer->code,
+            ])->values();
+
         return Inertia::render('POS/Index', [
             'organization' => $organization->only(['id', 'name', 'currency']),
             'currentBranch' => $branch->only(['id', 'name', 'code']),
@@ -70,6 +74,7 @@ class PointOfSaleController extends Controller
                 'expectedCash' => $shift->expectedCashAmount(),
                 'openedAt' => $shift->opened_at?->format('Y-m-d H:i'),
             ] : null,
+            'initialCustomers' => $initialCustomers,
             'initialProducts' => $this->searchProductsData((int) $organization->getKey(), (int) $branch->getKey(), '', 24),
             'offlineContext' => [
                 'organizationId' => (int) $organization->getKey(),
@@ -128,12 +133,18 @@ class PointOfSaleController extends Controller
         ]);
 
         $limit = (int) ($validated['limit'] ?? 500);
-        $products = $this->products->activeOfflineCatalogPage(
-            (int) $organization->getKey(),
-            (int) $branch->getKey(),
-            (int) ($validated['after_id'] ?? 0),
-            $limit + 1,
-        );
+        $products = Product::query()
+            ->forOrganization((int) $organization->getKey())
+            ->active()
+            ->where('id', '>', (int) ($validated['after_id'] ?? 0))
+            ->with([
+                'baseUnit:id,name_ar,name_en',
+                'barcodes:id,product_id,barcode',
+                'inventoryBalances' => fn ($query) => $query->where('branch_id', $branch->getKey()),
+            ])
+            ->orderBy('id')
+            ->limit($limit + 1)
+            ->get();
 
         $hasMore = $products->count() > $limit;
         if ($hasMore) {
@@ -163,11 +174,43 @@ class PointOfSaleController extends Controller
         ]);
     }
 
+    public function searchCustomers(Request $request): JsonResponse
+    {
+        /** @var Organization $organization */
+        $organization = $request->attributes->get('currentOrganization');
+        $this->authorize('usePos', $organization);
+        $validated = $request->validate(['q' => ['nullable', 'string', 'max:100']]);
+        $term = trim((string) ($validated['q'] ?? ''));
+
+        $customers = Customer::query()->forOrganization((int) $organization->getKey())->active()
+            ->when($term !== '', fn ($query) => $query->where(function ($nested) use ($term): void {
+                $like = '%'.$term.'%';
+                $nested->where('name', 'like', $like)->orWhere('phone', 'like', $like)->orWhere('code', 'like', $like);
+            }))
+            ->select(['id', 'name', 'phone', 'code'])->orderBy('name')->limit(50)->get()
+            ->map(static fn (Customer $customer): array => [
+                'id' => (int) $customer->getKey(), 'name' => $customer->name,
+                'phone' => $customer->phone, 'code' => $customer->code,
+            ])->values();
+
+        return response()->json(['data' => $customers]);
+    }
+
     /** @return list<array<string, mixed>> */
     private function searchProductsData(int $organizationId, int $branchId, string $term, int $limit): array
     {
-        return $this->products
-            ->searchActiveForBranch($organizationId, $branchId, $term, $limit)
+        return Product::query()
+            ->forOrganization($organizationId)
+            ->active()
+            ->search($term)
+            ->with([
+                'baseUnit:id,name_ar,name_en',
+                'barcodes:id,product_id,barcode',
+                'inventoryBalances' => fn ($query) => $query->where('branch_id', $branchId),
+            ])
+            ->orderBy('name')
+            ->limit($limit)
+            ->get()
             ->map(static function (Product $product): array {
                 $balance = $product->inventoryBalances->first();
 

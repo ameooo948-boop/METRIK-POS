@@ -256,6 +256,7 @@ export async function syncPendingOfflineSales(context, axios) {
             const response = await axios.post('/pos/offline/sync', {
                 client_operation_uuid: entry.uuid,
                 payment_method: entry.payment_method,
+                customer_id: entry.customer_id ? Number(entry.customer_id) : null,
                 notes: entry.notes || null,
                 shift_id: Number(entry.context.shiftId),
                 offline_created_at: entry.offline_created_at,

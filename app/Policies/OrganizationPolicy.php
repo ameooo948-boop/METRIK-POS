@@ -111,6 +111,21 @@ class OrganizationPolicy
             && OrganizationRole::tryFrom($role)?->canManageExpenses() === true;
     }
 
+    public function viewCustomers(User $user, Organization $organization): bool
+    {
+        return in_array($this->roleFor($user, $organization), ['owner', 'admin', 'branch_manager', 'accountant'], true);
+    }
+
+    public function manageCustomers(User $user, Organization $organization): bool
+    {
+        return in_array($this->roleFor($user, $organization), ['owner', 'admin', 'branch_manager', 'accountant'], true);
+    }
+
+    public function manageCustomerAccounts(User $user, Organization $organization): bool
+    {
+        return in_array($this->roleFor($user, $organization), ['owner', 'admin', 'branch_manager', 'accountant'], true);
+    }
+
     private function roleFor(User $user, Organization $organization): ?string
     {
         $membership = $user->organizations()
