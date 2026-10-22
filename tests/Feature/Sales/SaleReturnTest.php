@@ -54,6 +54,36 @@ class SaleReturnTest extends TestCase
         $this->assertSame('58.00', $shift->fresh()->expectedCashAmount()); // 50 opening + 16 sale - 8 return
     }
 
+    public function test_return_refunds_original_line_tax_and_reports_profit_excluding_tax(): void
+    {
+        [$owner, $organization, $branch, $product, $sale, $shift] = $this->createSale('Return Tax Market', '14.00');
+        $saleItem = $sale->items()->firstOrFail();
+
+        $this->assertSame('18.24', $sale->total);
+        $this->assertSame('2.24', $sale->tax_total);
+        $this->actingAs($owner)->post(route('sales.returns.store', $sale->getKey()), $this->payload($saleItem, '1.000'))
+            ->assertRedirect(route('sales.show', $sale->getKey()));
+
+        $return = SaleReturn::query()->where('sale_id', $sale->getKey())->firstOrFail();
+        $this->assertSame('9.12', $return->total);
+        $this->assertSame('1.12', $return->tax_total);
+        $this->assertDatabaseHas('sale_return_items', [
+            'sale_return_id' => $return->getKey(), 'sale_item_id' => $saleItem->getKey(),
+            'line_total' => '8.00', 'tax_amount' => '1.12',
+        ]);
+
+        $today = now('Africa/Cairo')->toDateString();
+        $this->actingAs($owner)->get(route('reports.index', [
+            'from_date' => $today, 'to_date' => $today, 'branch_id' => (string) $branch->getKey(),
+        ]))->assertOk()->assertInertia(fn (Assert $page) => $page
+            ->component('Reports/Index')
+            ->where('summary.sales', '18.24')
+            ->where('summary.returns', '9.12')
+            ->where('summary.taxCollected', '1.12')
+            ->where('summary.grossProfit', '3.00')
+            ->where('daily.0.taxCollected', '1.12'));
+    }
+
     public function test_same_return_uuid_is_idempotent_and_does_not_restock_or_refund_twice(): void
     {
         [$owner, $organization, $branch, $product, $sale, $shift] = $this->createSale('Return Idempotency Market');
@@ -206,7 +236,7 @@ class SaleReturnTest extends TestCase
     }
 
     /** @return array{0:User,1:Organization,2:Branch,3:Product,4:Sale,5:CashShift} */
-    private function createSale(string $name): array
+    private function createSale(string $name, ?string $taxRatePercent = null): array
     {
         $owner = User::factory()->create();
         $organization = Organization::query()->create([
@@ -217,6 +247,11 @@ class SaleReturnTest extends TestCase
         $branch = $organization->branches()->create([
             'name' => 'الفرع الرئيسي', 'code' => 'MAIN', 'is_main' => true, 'status' => 'active',
         ]);
+        if ($taxRatePercent !== null) {
+            $organization->forceFill(['settings' => [
+                'tax' => ['enabled' => true, 'rate_percent' => $taxRatePercent, 'mode' => 'exclusive'],
+            ]])->save();
+        }
         $organization->users()->attach($owner->getKey(), ['role' => 'owner', 'is_default' => true]);
         $branch->users()->attach($owner->getKey());
 

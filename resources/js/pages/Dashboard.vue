@@ -17,6 +17,7 @@ const props = defineProps({
     canViewReports: { type: Boolean, required: true },
     canManageExpenses: { type: Boolean, required: true },
     canViewAuditLogs: { type: Boolean, default: false },
+    canManageTaxSettings: { type: Boolean, default: false },
     unreadNotificationsCount: { type: Number, default: 0 },
     flashMessage: { type: String, default: null },
 });
@@ -53,6 +54,7 @@ function switchOrganization(event) {
                     <Link href="/branches" class="hidden rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold hover:border-emerald-300/50 sm:inline-flex">الفروع</Link>
                     <Link v-if="props.canManageTeam" href="/team-members" class="hidden rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold hover:border-emerald-300/50 sm:inline-flex">الفريق</Link>
                     <Link v-if="props.canViewAuditLogs" href="/audit-log" class="hidden rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold hover:border-emerald-300/50 lg:inline-flex">سجل التدقيق</Link>
+                    <Link v-if="props.canManageTaxSettings" href="/organization/settings/tax" class="hidden rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold hover:border-emerald-300/50 lg:inline-flex">الضريبة</Link>
                     <button @click="logout" class="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold hover:border-rose-300/40 hover:text-rose-200">خروج</button>
                 </div>
             </div>
@@ -84,6 +86,7 @@ function switchOrganization(event) {
                 <section class="rounded-2xl border border-white/10 bg-slate-900 p-6"><h2 class="text-xl font-bold">إعدادات المؤسسة</h2><p class="mt-2 leading-7 text-slate-400">تُدار العضويات والفروع حسب صلاحيات حسابك.</p><Link href="/branches" class="mt-4 inline-flex rounded-xl bg-emerald-300 px-4 py-3 font-bold text-slate-950 hover:bg-emerald-200">{{ props.canManageBranches ? 'إدارة الفروع' : 'عرض فروعك' }}</Link></section>
                 <Link v-if="props.canManageTeam" href="/team-members" class="rounded-2xl border border-white/10 bg-slate-900 p-6 transition hover:border-emerald-300/40"><p class="text-sm font-semibold text-emerald-300">المستخدمون والصلاحيات</p><h2 class="mt-2 text-xl font-bold">إدارة فريق العمل</h2><p class="mt-2 text-sm leading-6 text-slate-400">إضافة الموظفين المسجلين، وتحديد الأدوار والفروع المسموح بها.</p></Link>
                 <Link v-if="props.canViewAuditLogs" href="/audit-log" class="rounded-2xl border border-white/10 bg-slate-900 p-6 transition hover:border-emerald-300/40"><p class="text-sm font-semibold text-emerald-300">الأمان والامتثال</p><h2 class="mt-2 text-xl font-bold">سجل التدقيق</h2><p class="mt-2 text-sm leading-6 text-slate-400">مراجعة من أنشأ أو عدّل أو حذف سجلات الأعمال، مع تفاصيل الحقول التي تغيّرت.</p></Link>
+                <Link v-if="props.canManageTaxSettings" href="/organization/settings/tax" class="rounded-2xl border border-white/10 bg-slate-900 p-6 transition hover:border-emerald-300/40"><p class="text-sm font-semibold text-emerald-300">الإعدادات المالية</p><h2 class="mt-2 text-xl font-bold">ضريبة المبيعات</h2><p class="mt-2 text-sm leading-6 text-slate-400">تفعيل الضريبة وتحديد النسبة العامة للمؤسسة قبل إضافتها لفواتير البيع.</p></Link>
             </div>
 
             <section class="mt-8 rounded-2xl border border-white/10 bg-slate-900 p-6 sm:p-7">

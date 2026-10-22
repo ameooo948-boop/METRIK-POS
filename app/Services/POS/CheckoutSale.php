@@ -13,6 +13,7 @@ use App\Models\CustomerAccountTransaction;
 use App\Models\InventoryBalance;
 use App\Models\InventoryLot;
 use App\Models\InventoryMovement;
+use App\Models\Organization;
 use App\Models\Product;
 use App\Models\Promotion;
 use App\Models\Sale;
@@ -20,6 +21,7 @@ use App\Models\SaleItem;
 use App\Models\SalePayment;
 use App\Support\DecimalMoney;
 use App\Support\DecimalQuantity;
+use App\Support\OrganizationTaxSettings;
 use App\Support\ProductUnitOptions;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\QueryException;
@@ -296,9 +298,25 @@ class CheckoutSale
                 $preparedItems = $pricing['items'];
                 $subtotalCents = $pricing['subtotalCents'];
                 $discountTotalCents = $pricing['discountTotalCents'];
-                $totalCents = $pricing['totalCents'];
+                $preTaxTotalCents = $pricing['totalCents'];
 
-                if ($totalCents <= 0 || $totalCents > 99_999_999_999_999) {
+                // Tax settings belong to the organization. Prices are tax-exclusive;
+                // calculate and round tax per discounted line, then snapshot the rate
+                // and total on the invoice so later settings changes never rewrite history.
+                $organization = Organization::query()->findOrFail($data->organizationId);
+                $taxRateBasisPoints = OrganizationTaxSettings::rateBasisPoints($organization);
+                $taxTotalCents = 0;
+                foreach ($preparedItems as &$preparedItem) {
+                    $preparedItem['tax_cents'] = OrganizationTaxSettings::taxCents(
+                        (int) $preparedItem['net_line_total_cents'],
+                        $taxRateBasisPoints,
+                    );
+                    $taxTotalCents += $preparedItem['tax_cents'];
+                }
+                unset($preparedItem);
+                $totalCents = $preTaxTotalCents + $taxTotalCents;
+
+                if ($preTaxTotalCents <= 0 || $totalCents > 99_999_999_999_999) {
                     throw ValidationException::withMessages([
                         'items' => 'يجب أن يكون إجمالي الفاتورة بعد الخصومات أكبر من صفر وضمن الحد المسموح به.',
                     ]);
@@ -336,7 +354,8 @@ class CheckoutSale
                     'discount_total' => DecimalMoney::fromCents($discountTotalCents),
                     'promotion_code_snapshot' => $data->offlineCreatedAt === null ? $data->promotionCode : null,
                     'manual_discount_percent' => $data->offlineCreatedAt === null ? $data->manualDiscountPercent : '0.00',
-                    'tax_total' => '0.00',
+                    'tax_total' => DecimalMoney::fromCents($taxTotalCents),
+                    'tax_rate_percent' => OrganizationTaxSettings::ratePercent($taxRateBasisPoints),
                     'total' => DecimalMoney::fromCents($totalCents),
                     'notes' => $data->notes,
                     'sold_at' => now(),
@@ -368,7 +387,7 @@ class CheckoutSale
                         'unit_price' => $unitPrice,
                         'unit_cost_snapshot' => $unitCost,
                         'discount_amount' => DecimalMoney::fromCents($item['discount_cents']),
-                        'tax_amount' => '0.00',
+                        'tax_amount' => DecimalMoney::fromCents((int) ($item['tax_cents'] ?? 0)),
                         'line_total' => DecimalMoney::fromCents($item['net_line_total_cents']),
                     ]);
 

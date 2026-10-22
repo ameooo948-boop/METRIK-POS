@@ -147,10 +147,17 @@
     function renderCart() {
         const container = $('cart'); container.replaceChildren();
         $('cart-empty').classList.toggle('hidden', state.cart.length > 0);
-        let total = 0;
+        let preTaxTotalCents = 0;
+        let taxTotalCents = 0;
+        const taxRateBasisPoints = Math.max(0, Math.min(10000, Math.round(Number(state.context?.taxRateBasisPoints || 0))));
         state.cart.forEach((line) => {
-            const lineTotal = Math.round(Number(line.quantity) * Number(line.product.sellingPrice) * 100) / 100;
-            total += lineTotal;
+            const quantityMilli = Math.round(Number(line.quantity) * 1000);
+            const priceCents = Math.round(Number(line.product.sellingPrice) * 100);
+            const lineCents = Math.floor((quantityMilli * priceCents + 500) / 1000);
+            const lineTaxCents = Math.floor((lineCents * taxRateBasisPoints + 5000) / 10000);
+            const lineTotal = lineCents / 100;
+            preTaxTotalCents += lineCents;
+            taxTotalCents += lineTaxCents;
             const card = document.createElement('div'); card.className = 'cartline';
             const top = document.createElement('div'); top.className = 'cartline-top';
             const name = document.createElement('strong'); name.textContent = line.product.name;
@@ -172,7 +179,8 @@
             controls.append(qty, linePrice);
             card.append(top, controls); container.append(card);
         });
-        $('total').textContent = `${money(total)} ج.م`;
+        $('tax').textContent = `${money(taxTotalCents / 100)} ج.م`;
+        $('total').textContent = `${money((preTaxTotalCents + taxTotalCents) / 100)} ج.م`;
         $('save-sale').disabled = !state.context?.shiftId || state.cart.length === 0;
     }
     function renderQueue() {
@@ -221,7 +229,13 @@
             items,
             offline_created_at: new Date().toISOString(),
             createdAt: new Date().toISOString(),
-            estimatedTotal: items.reduce((sum, item) => sum + Math.round(Number(item.quantity) * Number(item.price_snapshot) * 100) / 100, 0),
+            estimatedTotal: (items.reduce((sum, item) => {
+                const quantityMilli = Math.round(Number(item.quantity) * 1000);
+                const priceCents = Math.round(Number(item.price_snapshot) * 100);
+                const lineCents = Math.floor((quantityMilli * priceCents + 500) / 1000);
+                const taxCents = Math.floor((lineCents * Math.max(0, Math.min(10000, Math.round(Number(state.context?.taxRateBasisPoints || 0)))) + 5000) / 10000);
+                return sum + lineCents + taxCents;
+            }, 0) / 100).toFixed(2),
             status: 'pending',
             attempts: 0,
         };

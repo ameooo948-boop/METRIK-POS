@@ -86,10 +86,10 @@ class ReportController extends Controller
 
             // UTF-8 BOM improves Arabic CSV compatibility with Microsoft Excel.
             fwrite($stream, "\xEF\xBB\xBF");
-            fputcsv($stream, ['التاريخ', 'عدد الفواتير', 'المبيعات قبل المرتجعات', 'المرتجعات', 'صافي المبيعات', 'تكلفة البضاعة بعد المرتجعات المعادة للمخزون', 'مجمل الربح التقديري', 'المصروفات', 'صافي التشغيل التقديري']);
+            fputcsv($stream, ['التاريخ', 'عدد الفواتير', 'المبيعات قبل المرتجعات', 'المرتجعات', 'صافي المبيعات شامل الضريبة', 'صافي ضريبة المبيعات', 'تكلفة البضاعة بعد المرتجعات المعادة للمخزون', 'مجمل الربح التقديري قبل الضريبة', 'المصروفات', 'صافي التشغيل التقديري قبل الضريبة']);
             foreach ($report['daily'] as $row) {
                 fputcsv($stream, [
-                    $row['date'], $row['invoices'], $row['sales'], $row['returns'], $row['netSales'], $row['costOfGoods'],
+                    $row['date'], $row['invoices'], $row['sales'], $row['returns'], $row['netSales'], $row['taxCollected'] ?? '0.00', $row['costOfGoods'],
                     $row['grossProfit'], $row['expenses'], $row['netProfit'],
                 ]);
             }

@@ -36,6 +36,7 @@ class DashboardController extends Controller
             'canViewReports' => $request->user()->can('viewReports', $organization),
             'canManageExpenses' => $request->user()->can('manageExpenses', $organization),
             'canViewAuditLogs' => $request->user()->can('viewAuditLogs', $organization),
+            'canManageTaxSettings' => $request->user()->can('manageTaxSettings', $organization),
             'unreadNotificationsCount' => $request->user()->unreadNotifications()->count(),
             'flashMessage' => $request->session()->get('success'),
         ]);

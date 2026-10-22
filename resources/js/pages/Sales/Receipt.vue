@@ -61,14 +61,14 @@ function printReceipt() {
             <div class="receipt-rule receipt-rule--dashed"></div>
             <table class="receipt-items">
                 <thead>
-                    <tr><th>الصنف</th><th class="number-cell">كمية</th><th class="number-cell">السعر</th><th class="number-cell">الإجمالي</th></tr>
+                    <tr><th>الصنف</th><th class="number-cell">كمية</th><th class="number-cell">السعر</th><th class="number-cell">الصافي</th></tr>
                 </thead>
                 <tbody>
                     <tr v-for="item in sale.items" :key="item.id">
                         <td class="item-name"><span>{{ item.name }}</span><small v-if="item.sku">{{ item.sku }}</small><small v-if="item.promotionName && Number(item.discountAmount) > 0">{{ item.promotionName }} · خصم {{ money(item.discountAmount) }}</small><small v-else-if="Number(item.discountAmount) > 0">خصم {{ money(item.discountAmount) }}</small></td>
                         <td class="number-cell">{{ quantity(item.quantity) }}<small v-if="item.unitName">{{ item.unitName }}</small></td>
                         <td class="number-cell">{{ money(item.unitPrice) }}</td>
-                        <td class="number-cell strong-cell">{{ money(item.lineTotal) }}</td>
+                        <td class="number-cell strong-cell">{{ money(item.lineTotal) }}<small v-if="Number(item.taxAmount) > 0" class="tax-line">ضريبة {{ money(item.taxAmount) }}</small></td>
                     </tr>
                 </tbody>
             </table>
@@ -141,6 +141,7 @@ function printReceipt() {
 .item-name { text-align: right; font-weight: 700; }
 .item-name small { display: block; color: #6b7280; font-size: 8px; font-weight: 400; }
 .strong-cell { font-weight: 800; }
+.tax-line { display: block; margin-top: 1mm; color: #0369a1; font-size: 8px; font-weight: 500; }
 .total-row { margin-top: 1mm; padding-top: 2mm; border-top: 1px solid #6b7280; font-size: 13px; font-weight: 900; }
 .total-row > span, .remaining-row > span { color: #111827; font-weight: 900; }
 .remaining-row { margin-top: 1mm; padding: 1.5mm; border: 1px solid #d1d5db; font-weight: 900; }

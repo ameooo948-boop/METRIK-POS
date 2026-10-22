@@ -16,13 +16,14 @@ class SaleReturn extends Model
     protected $fillable = [
         'organization_id', 'branch_id', 'sale_id', 'cash_shift_id', 'cashier_id',
         'return_number', 'client_operation_uuid', 'refund_method', 'refund_reference',
-        'reason', 'status', 'total', 'returned_at',
+        'reason', 'status', 'total', 'tax_total', 'returned_at',
     ];
 
     protected function casts(): array
     {
         return [
             'total' => 'decimal:2',
+            'tax_total' => 'decimal:2',
             'returned_at' => 'datetime',
         ];
     }

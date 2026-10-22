@@ -19,6 +19,7 @@ import {
 
 const props = defineProps({
     organization: { type: Object, required: true },
+    taxSettings: { type: Object, default: () => ({ enabled: false, ratePercent: '0.00', rateBasisPoints: 0 }) },
     currentBranch: { type: Object, required: true },
     offlineContext: { type: Object, required: true },
     shift: { type: Object, default: null },
@@ -274,13 +275,23 @@ const cartPricing = computed(() => {
     const promotionDiscountCents = lines.reduce((sum, line) => sum + line.promotionDiscountCents, 0);
     const manualDiscountCents = lines.reduce((sum, line) => sum + line.manualDiscountCents, 0);
     const discountTotalCents = promotionDiscountCents + manualDiscountCents;
-    const totalCents = lines.reduce((sum, line) => sum + line.grossCents - line.promotionDiscountCents - line.manualDiscountCents, 0);
-    return { lines, subtotalCents, promotionDiscountCents, manualDiscountCents, discountTotalCents, totalCents };
+    const preTaxTotalCents = lines.reduce((sum, line) => {
+        line.netLineTotalCents = Math.max(0, line.grossCents - line.promotionDiscountCents - line.manualDiscountCents);
+        return sum + line.netLineTotalCents;
+    }, 0);
+    const taxRateBasisPoints = Math.max(0, Math.min(10000, Math.round(Number(props.taxSettings?.rateBasisPoints || 0))));
+    const taxTotalCents = lines.reduce((sum, line) => {
+        line.taxCents = Math.floor((line.netLineTotalCents * taxRateBasisPoints + 5000) / 10000);
+        return sum + line.taxCents;
+    }, 0);
+    const totalCents = preTaxTotalCents + taxTotalCents;
+    return { lines, subtotalCents, promotionDiscountCents, manualDiscountCents, discountTotalCents, preTaxTotalCents, taxRateBasisPoints, taxTotalCents, totalCents };
 });
 const totalCents = computed(() => cartPricing.value.totalCents);
 const estimatedTotal = computed(() => (totalCents.value / 100).toFixed(2));
 const estimatedSubtotal = computed(() => (cartPricing.value.subtotalCents / 100).toFixed(2));
 const estimatedDiscount = computed(() => (cartPricing.value.discountTotalCents / 100).toFixed(2));
+const estimatedTax = computed(() => (cartPricing.value.taxTotalCents / 100).toFixed(2));
 function linePricingFor(productId) {
     return cartPricing.value.lines.find((line) => Number(line.productId) === Number(productId)) || null;
 }
@@ -474,7 +485,7 @@ async function queueOfflineCheckout() {
         quantity: String(line.quantity),
         price_snapshot: Number(lineUnit(line).sellingPrice).toFixed(2),
     }));
-    const estimatedTotal = items.reduce((sum, item) => sum + Math.round(Number(item.quantity) * Number(item.price_snapshot) * 100) / 100, 0);
+    const estimatedTotal = Number((cartPricing.value.totalCents / 100).toFixed(2));
 
     await enqueueOfflineSale({
         uuid,
@@ -559,8 +570,9 @@ async function retryReviewedSale(entry) {
 
     const productById = new Map(cachedCatalog.value.map((product) => [Number(product.id), product]));
     const oldTotal = Number(entry.estimatedTotal || 0);
-    let newTotal = 0;
+    let newTotalCents = 0;
     const revisedItems = [];
+    const taxRateBasisPoints = Math.max(0, Math.min(10000, Math.round(Number(offlineContext.value.taxRateBasisPoints || 0))));
 
     for (const item of entry.items || []) {
         const product = productById.get(Number(item.product_id));
@@ -570,13 +582,18 @@ async function retryReviewedSale(entry) {
         }
         const unit = (product.units || []).find((option) => Number(option.id) === Number(item.unit_id ?? product.baseUnitId)) || (product.units || [])[0];
         const price = Number(unit?.sellingPrice ?? product.sellingPrice).toFixed(2);
-        newTotal += Math.round(Number(item.quantity) * Number(price) * 100) / 100;
+        const quantityMilli = Math.round(Number(item.quantity) * 1000);
+        const priceCents = Math.round(Number(price) * 100);
+        const lineCents = Math.floor((quantityMilli * priceCents + 500) / 1000);
+        const taxCents = Math.floor((lineCents * taxRateBasisPoints + 5000) / 10000);
+        newTotalCents += lineCents + taxCents;
         revisedItems.push({ ...item, price_snapshot: price });
     }
 
+    const newTotal = newTotalCents / 100;
     const message = `إعادة المحاولة للمرجع ${entry.uuid.slice(0, 8)}.
 الإجمالي المحلي القديم: ${money(oldTotal)} ج.م
-الإجمالي حسب الأسعار الحالية: ${money(newTotal)} ج.م
+الإجمالي حسب الأسعار والضريبة الحالية: ${money(newTotal)} ج.م
 تأكد من مراجعة المخزون والمبلغ المقبوض فعليًا قبل المتابعة.`;
     if (!window.confirm(message)) return;
 
@@ -779,6 +796,7 @@ onBeforeUnmount(() => {
                         <div class="flex items-center justify-between gap-4 text-slate-400"><span>عدد الأصناف</span><span>{{ cart.length }}</span></div>
                         <div class="flex items-center justify-between gap-4 text-slate-400"><span>المجموع قبل الخصم</span><span>{{ money(estimatedSubtotal) }} ج.م</span></div>
                         <div v-if="Number(estimatedDiscount) > 0" class="flex items-center justify-between gap-4 text-emerald-200"><span>إجمالي الخصومات</span><span>- {{ money(estimatedDiscount) }} ج.م</span></div>
+                        <div v-if="cartPricing.taxRateBasisPoints > 0" class="flex items-center justify-between gap-4 text-sky-200"><span>ضريبة المبيعات ({{ props.taxSettings.ratePercent }}%)</span><span>{{ money(estimatedTax) }} ج.م</span></div>
                         <div class="flex items-center justify-between gap-4 border-t border-white/10 pt-3 text-xl font-black"><span>الإجمالي النهائي</span><span class="text-emerald-200">{{ money(estimatedTotal) }} ج.م</span></div>
                         <div class="space-y-3 rounded-xl border border-white/10 bg-slate-950/50 p-3">
                             <div><label for="promotion-code" class="mb-1 block text-sm font-medium">كوبون خصم (اختياري)</label><input id="promotion-code" v-model="checkoutForm.promotion_code" maxlength="40" autocomplete="off" :disabled="!isConnected" class="w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2.5 uppercase outline-none focus:border-emerald-300 disabled:opacity-50" placeholder="مثال: SAVE10" /><p v-if="checkoutForm.errors.promotion_code" class="mt-1 text-sm text-rose-300" role="alert">{{ checkoutForm.errors.promotion_code }}</p></div>

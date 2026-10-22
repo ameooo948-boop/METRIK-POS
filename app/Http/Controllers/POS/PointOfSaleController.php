@@ -11,6 +11,7 @@ use App\Models\Product;
 use App\Models\Promotion;
 use App\Models\Sale;
 use App\Support\ProductUnitOptions;
+use App\Support\OrganizationTaxSettings;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -118,8 +119,17 @@ class PointOfSaleController extends Controller
                 'phone' => $customer->phone, 'code' => $customer->code,
             ])->values();
 
+        $taxRateBasisPoints = OrganizationTaxSettings::rateBasisPoints($organization);
+        $organizationSettings = is_array($organization->settings) ? $organization->settings : [];
+        $taxSettings = is_array($organizationSettings['tax'] ?? null) ? $organizationSettings['tax'] : [];
+
         return Inertia::render('POS/Index', [
             'organization' => $organization->only(['id', 'name', 'currency']),
+            'taxSettings' => [
+                'enabled' => (bool) ($taxSettings['enabled'] ?? false),
+                'ratePercent' => OrganizationTaxSettings::ratePercent($taxRateBasisPoints),
+                'rateBasisPoints' => $taxRateBasisPoints,
+            ],
             'currentBranch' => $branch->only(['id', 'name', 'code']),
             'shift' => $shift ? [
                 'id' => $shift->getKey(),
@@ -144,6 +154,7 @@ class PointOfSaleController extends Controller
                 'shiftId' => $shift ? (int) $shift->getKey() : null,
                 'shiftOpenedAt' => $shift?->opened_at?->toIso8601String(),
                 'currency' => (string) ($organization->currency ?? 'EGP'),
+                'taxRateBasisPoints' => $taxRateBasisPoints,
             ],
             'recentSales' => $sales,
             'canViewSales' => $request->user()->can('viewSales', $organization),

@@ -55,7 +55,7 @@ final readonly class CreateSaleData
             customerId: isset($data['customer_id']) && $data['customer_id'] !== '' ? (int) $data['customer_id'] : null,
             promotionCode: $offlineCreatedAt === null && isset($data['promotion_code']) && trim((string) $data['promotion_code']) !== '' ? strtoupper(trim((string) $data['promotion_code'])) : null,
             manualDiscountPercent: $offlineCreatedAt === null && isset($data['manual_discount_percent']) && trim((string) $data['manual_discount_percent']) !== '' ? (string) $data['manual_discount_percent'] : '0.00',
-            expectedTotal: $offlineCreatedAt === null && isset($data['expected_total']) && trim((string) $data['expected_total']) !== '' ? (string) $data['expected_total'] : null,
+            expectedTotal: isset($data['expected_total']) && trim((string) $data['expected_total']) !== '' ? (string) $data['expected_total'] : null,
         );
     }
 }

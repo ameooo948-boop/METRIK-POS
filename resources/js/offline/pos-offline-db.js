@@ -72,6 +72,7 @@ export function createOfflineContext(source) {
         shiftId,
         shiftOpenedAt: source?.shiftOpenedAt || null,
         currency: String(source?.currency || 'EGP'),
+        taxRateBasisPoints: Math.max(0, Math.min(10000, Math.round(Number(source?.taxRateBasisPoints || 0)))),
         catalogScopeKey: `${organizationId}:${branchId}`,
         saleScopeKey: shiftId == null ? null : `${organizationId}:${branchId}:${cashierId}:${shiftId}`,
     };
@@ -263,6 +264,7 @@ export async function syncPendingOfflineSales(context, axios) {
                 payment_method: entry.payment_method,
                 customer_id: entry.customer_id ? Number(entry.customer_id) : null,
                 notes: entry.notes || null,
+                expected_total: entry.estimatedTotal == null ? null : Number(entry.estimatedTotal).toFixed(2),
                 shift_id: Number(entry.context.shiftId),
                 offline_created_at: entry.offline_created_at,
                 items: entry.items.map((item) => ({

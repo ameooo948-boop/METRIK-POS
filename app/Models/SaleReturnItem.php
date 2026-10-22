@@ -13,7 +13,7 @@ class SaleReturnItem extends Model
     protected $fillable = [
         'organization_id', 'sale_return_id', 'sale_item_id', 'product_id',
         'product_sku_snapshot', 'product_name_snapshot', 'quantity', 'unit_price',
-        'unit_cost_snapshot', 'line_total', 'restock',
+        'unit_cost_snapshot', 'line_total', 'tax_amount', 'restock',
     ];
 
     protected function casts(): array
@@ -23,6 +23,7 @@ class SaleReturnItem extends Model
             'unit_price' => 'decimal:2',
             'unit_cost_snapshot' => 'decimal:2',
             'line_total' => 'decimal:2',
+            'tax_amount' => 'decimal:2',
             'restock' => 'boolean',
         ];
     }

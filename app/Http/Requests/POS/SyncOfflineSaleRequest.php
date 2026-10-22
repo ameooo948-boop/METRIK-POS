@@ -24,7 +24,9 @@ class SyncOfflineSaleRequest extends StoreSaleRequest
         // StoreSaleRequest normalizes a missing manual discount to '0.00', so
         // validate that exact no-discount value here instead of using prohibited.
         $rules['manual_discount_percent'] = ['required', 'numeric', 'min:0', 'max:0', 'decimal:0,2'];
-        $rules['expected_total'] = ['prohibited'];
+        // Optional for compatibility with older queued offline records, but new clients
+        // send the captured total so changed tax settings are flagged for manual review.
+        $rules['expected_total'] = ['nullable', 'numeric', 'min:0', 'max:999999999999.99', 'decimal:0,2'];
 
         return $rules;
     }

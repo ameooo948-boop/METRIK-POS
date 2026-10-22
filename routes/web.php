@@ -23,6 +23,7 @@ use App\Http\Controllers\Inventory\LowStockController;
 use App\Http\Controllers\Inventory\InventoryValuationController;
 use App\Http\Controllers\Inventory\InventoryLotController;
 use App\Http\Controllers\Organizations\OrganizationSetupController;
+use App\Http\Controllers\Organizations\OrganizationTaxSettingsController;
 use App\Http\Controllers\Organizations\SwitchOrganizationController;
 use App\Http\Controllers\POS\CashShiftController;
 use App\Http\Controllers\POS\CashShiftAuditController;
@@ -65,6 +66,8 @@ Route::middleware(['auth', SecurityHeaders::class])->group(function () {
 
     Route::middleware([ResolveOrganizationContext::class, RequestLogContext::class, AuditMutationRequests::class])->group(function () {
         Route::get('/dashboard', DashboardController::class)->name('dashboard');
+        Route::get('/organization/settings/tax', [OrganizationTaxSettingsController::class, 'index'])->name('organization.tax-settings.index');
+        Route::put('/organization/settings/tax', [OrganizationTaxSettingsController::class, 'update'])->name('organization.tax-settings.update');
         Route::get('/audit-log/export', [AuditLogController::class, 'export'])->middleware('throttle:30,1')->name('audit-log.export');
         Route::get('/audit-log', [AuditLogController::class, 'index'])->name('audit-log.index');
 

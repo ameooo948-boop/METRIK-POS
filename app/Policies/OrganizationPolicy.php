@@ -140,6 +140,12 @@ class OrganizationPolicy
         return in_array($this->roleFor($user, $organization), ['owner', 'admin'], true);
     }
 
+    public function manageTaxSettings(User $user, Organization $organization): bool
+    {
+        // Tax settings affect invoice totals and financial reporting, so only the owner can change them.
+        return $this->roleFor($user, $organization) === 'owner';
+    }
+
     private function roleFor(User $user, Organization $organization): ?string
     {
         $membership = $user->organizations()

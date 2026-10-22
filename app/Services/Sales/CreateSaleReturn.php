@@ -74,7 +74,8 @@ class CreateSaleReturn
                     ->where('sale_returns.status', 'completed')
                     ->selectRaw(
                         'sale_return_items.sale_item_id, COALESCE(SUM(sale_return_items.quantity), 0) AS returned_quantity, '
-                        .'COALESCE(SUM(sale_return_items.line_total), 0) AS refunded_total'
+                        .'COALESCE(SUM(sale_return_items.line_total), 0) AS refunded_total, '
+                        .'COALESCE(SUM(sale_return_items.tax_amount), 0) AS refunded_tax_total'
                     )
                     ->groupBy('sale_return_items.sale_item_id')
                     ->get()
@@ -103,6 +104,7 @@ class CreateSaleReturn
 
                 $preparedItems = [];
                 $totalCents = 0;
+                $taxTotalCents = 0;
 
                 foreach ($data->items as $requestedItem) {
                     $saleItemId = $requestedItem['sale_item_id'];
@@ -132,6 +134,19 @@ class CreateSaleReturn
                         $lineRefundCents = min($lineRefundCents, $remainingRefundCents);
                     }
 
+                    // Tax is refunded proportionally from the original sale line, not
+                    // recalculated at the organization's current rate. The final partial
+                    // return receives any rounding remainder.
+                    $originalTaxCents = DecimalMoney::toCents((string) $saleItem->tax_amount);
+                    $alreadyRefundedTaxCents = DecimalMoney::toCents((string) ($previous?->refunded_tax_total ?? '0.00'));
+                    $remainingTaxCents = max(0, $originalTaxCents - $alreadyRefundedTaxCents);
+                    if ($requestedMilli === $availableMilli) {
+                        $taxRefundCents = $remainingTaxCents;
+                    } else {
+                        $taxRefundCents = intdiv(($originalTaxCents * $requestedMilli) + intdiv($soldMilli, 2), $soldMilli);
+                        $taxRefundCents = min($taxRefundCents, $remainingTaxCents);
+                    }
+
                     $unitCostCents = DecimalMoney::toCents((string) $saleItem->unit_cost_snapshot);
                     $costCents = intdiv(($unitCostCents * $requestedMilli) + 500, 1000);
                     $restock = (bool) $requestedItem['restock'];
@@ -143,10 +158,12 @@ class CreateSaleReturn
                         'quantity_milli' => $requestedMilli,
                         'base_quantity_milli' => $baseQuantityMilli,
                         'line_refund_cents' => $lineRefundCents,
+                        'tax_refund_cents' => $taxRefundCents,
                         'cost_cents' => $costCents,
                         'restock' => $restock,
                     ];
-                    $totalCents += $lineRefundCents;
+                    $totalCents += $lineRefundCents + $taxRefundCents;
+                    $taxTotalCents += $taxRefundCents;
                 }
 
                 $return = SaleReturn::query()->create([
@@ -162,6 +179,7 @@ class CreateSaleReturn
                     'reason' => $data->reason,
                     'status' => 'completed',
                     'total' => DecimalMoney::fromCents($totalCents),
+                    'tax_total' => DecimalMoney::fromCents($taxTotalCents),
                     'returned_at' => now(),
                 ]);
 
@@ -182,6 +200,7 @@ class CreateSaleReturn
                         'unit_price' => $saleItem->unit_price,
                         'unit_cost_snapshot' => $saleItem->unit_cost_snapshot,
                         'line_total' => DecimalMoney::fromCents($prepared['line_refund_cents']),
+                        'tax_amount' => DecimalMoney::fromCents($prepared['tax_refund_cents']),
                         'restock' => $restock,
                     ]);
 

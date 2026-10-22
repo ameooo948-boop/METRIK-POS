@@ -64,6 +64,33 @@ class OfflineSaleSyncTest extends TestCase
         $this->assertSame(2, InventoryMovement::query()->where('product_id', $product->getKey())->count());
     }
 
+    public function test_offline_sync_accepts_tax_inclusive_estimate_and_validates_it_against_server_settings(): void
+    {
+        [$owner, $organization, $branch] = $this->createOrganizationFor('Offline Tax Sync Market');
+        $organization->forceFill(['settings' => [
+            'tax' => ['enabled' => true, 'rate_percent' => '14.00', 'mode' => 'exclusive'],
+        ]])->save();
+        $product = $this->createProduct($organization, $owner, $branch, 'OFFLINE-TAX-001', 'منتج متزامن بضريبة', '10.000');
+        $this->openShift($owner);
+        $shift = CashShift::query()->where('cashier_id', $owner->getKey())->where('status', 'open')->firstOrFail();
+        $createdAt = now()->subMinute()->toIso8601String();
+
+        $payload = $this->offlinePayload((string) Str::uuid(), $shift, $product, $createdAt, '2.000');
+        $payload['expected_total'] = '18.24';
+        $this->actingAs($owner)->postJson(route('pos.offline.sync'), $payload)
+            ->assertOk()
+            ->assertJsonPath('sale.total', '18.24');
+
+        $stalePayload = $this->offlinePayload((string) Str::uuid(), $shift, $product, $createdAt, '1.000');
+        $stalePayload['expected_total'] = '9.12'; // Valid estimate at the cached 14% rate; current 20% must be rejected.
+        $organization->forceFill(['settings' => [
+            'tax' => ['enabled' => true, 'rate_percent' => '20.00', 'mode' => 'exclusive'],
+        ]])->save();
+        $this->actingAs($owner)->postJson(route('pos.offline.sync'), $stalePayload)
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('expected_total');
+    }
+
     public function test_offline_sync_rejects_a_product_price_that_changed_after_catalog_was_cached(): void
     {
         [$owner, $organization, $branch] = $this->createOrganizationFor('Offline Price Conflict Market');

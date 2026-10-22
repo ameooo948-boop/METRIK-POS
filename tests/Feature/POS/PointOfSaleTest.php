@@ -85,6 +85,43 @@ class PointOfSaleTest extends TestCase
         ]);
     }
 
+    public function test_checkout_applies_organization_tax_after_discounts_and_snapshots_the_rate(): void
+    {
+        [$owner, $organization, $branch] = $this->createOrganizationFor('POS Tax Market');
+        $organization->forceFill(['settings' => [
+            'tax' => ['enabled' => true, 'rate_percent' => '14.00', 'mode' => 'exclusive'],
+        ]])->save();
+        $product = $this->createProduct($organization, $owner, $branch, 'TAX-001', 'منتج خاضع للضريبة', '10.000');
+        $this->actingAs($owner)->post(route('pos.shifts.open'), ['opening_amount' => '100.00'])->assertRedirect(route('pos.index'));
+        $uuid = (string) Str::uuid();
+
+        $this->actingAs($owner)->post(route('pos.checkout'), [
+            'client_operation_uuid' => $uuid,
+            'payment_method' => 'cash',
+            'manual_discount_percent' => '10.00',
+            'expected_total' => '16.42',
+            'items' => [['product_id' => $product->getKey(), 'quantity' => '2.000']],
+        ])->assertRedirect();
+
+        $sale = Sale::query()->where('organization_id', $organization->getKey())->where('client_operation_uuid', $uuid)->firstOrFail();
+        $this->assertSame('16.00', $sale->subtotal);
+        $this->assertSame('1.60', $sale->discount_total);
+        $this->assertSame('2.02', $sale->tax_total); // 14% of the discounted 14.40 line, rounded half-up.
+        $this->assertSame('14.00', $sale->tax_rate_percent);
+        $this->assertSame('16.42', $sale->total);
+        $this->assertDatabaseHas('sale_items', [
+            'sale_id' => $sale->getKey(), 'product_id' => $product->getKey(),
+            'line_total' => '14.40', 'tax_amount' => '2.02',
+        ]);
+        $this->assertDatabaseHas('sale_payments', ['sale_id' => $sale->getKey(), 'amount' => '16.42']);
+        $this->assertDatabaseHas('cash_movements', ['sale_id' => $sale->getKey(), 'movement_type' => 'cash_sale', 'amount' => '16.42']);
+
+        // Changing the organization rate later must not mutate the invoice snapshot.
+        $organization->forceFill(['settings' => ['tax' => ['enabled' => true, 'rate_percent' => '20.00', 'mode' => 'exclusive']]])->save();
+        $this->assertSame('14.00', $sale->fresh()->tax_rate_percent);
+        $this->assertSame('16.42', $sale->fresh()->total);
+    }
+
     public function test_replaying_same_operation_uuid_does_not_double_sell_stock(): void
     {
         [$owner, $organization, $branch] = $this->createOrganizationFor('POS Idempotency Market');
