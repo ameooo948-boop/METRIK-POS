@@ -33,3 +33,14 @@ if (is_string($backupAlertEmail) && filter_var($backupAlertEmail, FILTER_VALIDAT
     $backupSchedule->emailOutputOnFailure($backupAlertEmail);
     $backupCheckSchedule->emailOutputOnFailure($backupAlertEmail);
 }
+
+
+// Write a machine-readable operations snapshot every five minutes. External monitoring
+// should watch this log/exit code and apply alert deduplication at the monitoring layer.
+Schedule::command('metrik:operations-check --strict --json')
+    ->everyFiveMinutes()
+    ->withoutOverlapping()
+    ->appendOutputTo(storage_path('logs/metrik-operations-check.log'))
+    ->onFailure(static function (): void {
+        logger()->critical('Scheduled Metrik operations check failed; inspect metrik-operations-check.log.');
+    });

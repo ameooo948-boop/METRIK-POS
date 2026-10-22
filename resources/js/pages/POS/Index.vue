@@ -631,7 +631,9 @@ async function syncOfflineWork() {
         isOnline.value = navigator.onLine;
         await refreshOutboxCounts();
         await refreshCachedCatalog();
-        if (result.needsReview) {
+        if (result.stopped === 'locked') {
+            offlineStatusMessage.value = 'توجد مزامنة جارية لنفس الوردية في علامة تبويب أخرى. لم نرسل الطلبات من هذه العلامة لتجنب التداخل.';
+        } else if (result.needsReview) {
             offlineStatusMessage.value = `تمت مزامنة ${result.synced} عملية، وتوجد ${result.needsReview} عملية تحتاج مراجعة يدوية.`;
         } else if (result.pending) {
             offlineStatusMessage.value = `تمت مزامنة ${result.synced} عملية؛ ما زالت ${result.pending} عملية في الانتظار.`;

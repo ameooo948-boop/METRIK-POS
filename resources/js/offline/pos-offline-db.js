@@ -235,7 +235,7 @@ export async function syncOfflineCatalog(context, axios) {
     return allProducts.length;
 }
 
-export async function syncPendingOfflineSales(context, axios) {
+async function syncPendingOfflineSalesUnlocked(context, axios) {
     if (!context?.saleScopeKey || !navigator.onLine) {
         return { synced: 0, pending: 0, needsReview: 0, stopped: 'offline' };
     }
@@ -307,3 +307,109 @@ export async function syncPendingOfflineSales(context, axios) {
         stopped,
     };
 }
+
+// Cross-tab lease stored in the existing IndexedDB meta store. This intentionally
+// avoids a DB version bump so the standalone emergency offline page stays compatible.
+const OFFLINE_SYNC_LOCK_PREFIX = 'syncLock:';
+const OFFLINE_SYNC_LOCK_LEASE_MS = 90_000;
+const OFFLINE_SYNC_LOCK_HEARTBEAT_MS = 25_000;
+
+function createOfflineSyncLockToken() {
+    if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+    return `sync-${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+}
+
+function offlineSyncLockKey(saleScopeKey) {
+    return `${OFFLINE_SYNC_LOCK_PREFIX}${saleScopeKey}`;
+}
+
+async function writeOfflineSyncLock(saleScopeKey, token, mode) {
+    const db = await openDatabase();
+    const key = offlineSyncLockKey(saleScopeKey);
+
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(META_STORE, 'readwrite');
+        const store = tx.objectStore(META_STORE);
+        const request = store.get(key);
+        let acquired = false;
+
+        request.onsuccess = () => {
+            const current = request.result?.value;
+            const expiresAt = Date.parse(current?.expiresAt ?? '');
+            const now = Date.now();
+
+            if (mode === 'acquire') {
+                if (current && Number.isFinite(expiresAt) && expiresAt > now && current.token !== token) return;
+            } else if (!current || current.token !== token) {
+                return;
+            }
+
+            if (mode === 'release') {
+                store.delete(key);
+                acquired = true;
+                return;
+            }
+
+            store.put({
+                key,
+                value: {
+                    token,
+                    expiresAt: new Date(now + OFFLINE_SYNC_LOCK_LEASE_MS).toISOString(),
+                },
+                updatedAt: new Date(now).toISOString(),
+            });
+            acquired = true;
+        };
+
+        request.onerror = () => reject(request.error || new Error('تعذر قراءة قفل مزامنة المبيعات المحلية.'));
+        tx.oncomplete = () => resolve(acquired);
+        tx.onerror = () => reject(tx.error || new Error('تعذرت تحديث حالة قفل المزامنة.'));
+        tx.onabort = () => reject(tx.error || new Error('تم إلغاء تحديث قفل المزامنة.'));
+    });
+}
+
+/**
+ * Synchronize each browser scope in one tab at a time. Server-side operation UUID
+ * idempotency remains the final protection if a suspended tab loses its lease.
+ */
+export async function syncPendingOfflineSales(context, axios) {
+    if (!context?.saleScopeKey || !navigator.onLine) {
+        return syncPendingOfflineSalesUnlocked(context, axios);
+    }
+
+    const token = createOfflineSyncLockToken();
+    const acquired = await writeOfflineSyncLock(context.saleScopeKey, token, 'acquire');
+
+    if (!acquired) {
+        const queue = await getOutboxForSaleScope(context.saleScopeKey);
+        return {
+            synced: 0,
+            pending: queue.filter((entry) => ['pending', 'syncing'].includes(entry.status)).length,
+            needsReview: queue.filter((entry) => entry.status === 'needs_review').length,
+            stopped: 'locked',
+        };
+    }
+
+    let heartbeatBusy = false;
+    const heartbeat = setInterval(() => {
+        if (heartbeatBusy) return;
+        heartbeatBusy = true;
+        writeOfflineSyncLock(context.saleScopeKey, token, 'renew')
+            .catch(() => false)
+            .finally(() => { heartbeatBusy = false; });
+    }, OFFLINE_SYNC_LOCK_HEARTBEAT_MS);
+
+    try {
+        return await syncPendingOfflineSalesUnlocked(context, axios);
+    } finally {
+        clearInterval(heartbeat);
+        // A release failure is safe: the lease expires automatically. Do not mask
+        // the actual sync result/error with a lock cleanup error.
+        try {
+            await writeOfflineSyncLock(context.saleScopeKey, token, 'release');
+        } catch (error) {
+            console.warn('تعذر تحرير قفل مزامنة المبيعات المحلية؛ سينتهي القفل تلقائيًا.', error);
+        }
+    }
+}
+

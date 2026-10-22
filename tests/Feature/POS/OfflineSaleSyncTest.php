@@ -91,6 +91,35 @@ class OfflineSaleSyncTest extends TestCase
             ->assertJsonValidationErrors('expected_total');
     }
 
+    public function test_offline_sync_rejects_reusing_operation_uuid_with_a_different_cart(): void
+    {
+        [$owner, $organization, $branch] = $this->createOrganizationFor('Offline Idempotency Conflict Market');
+        $product = $this->createProduct($organization, $owner, $branch, 'OFFLINE-UUID-001', 'منتج التكرار', '10.000');
+        $this->openShift($owner);
+        $shift = CashShift::query()->where('cashier_id', $owner->getKey())->where('status', 'open')->firstOrFail();
+        $uuid = (string) Str::uuid();
+        $payload = $this->offlinePayload($uuid, $shift, $product, now()->subMinute()->toIso8601String(), '2.000');
+
+        $this->actingAs($owner)->postJson(route('pos.offline.sync'), $payload)
+            ->assertOk()
+            ->assertJsonPath('status', 'synced');
+
+        // A retry with the same operation UUID is only valid when it represents the
+        // exact same business operation. It must not turn a previous two-unit sale
+        // into a new three-unit sale or silently bypass idempotency checks.
+        $changedPayload = $payload;
+        $changedPayload['items'][0]['quantity'] = '3.000';
+
+        $this->actingAs($owner)->postJson(route('pos.offline.sync'), $changedPayload)
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('client_operation_uuid');
+
+        $this->assertSame(1, Sale::query()->where('organization_id', $organization->getKey())->count());
+        $balance = InventoryBalance::query()->where('organization_id', $organization->getKey())
+            ->where('branch_id', $branch->getKey())->where('product_id', $product->getKey())->firstOrFail();
+        $this->assertSame('8.000', (string) $balance->quantity);
+    }
+
     public function test_offline_sync_rejects_a_product_price_that_changed_after_catalog_was_cached(): void
     {
         [$owner, $organization, $branch] = $this->createOrganizationFor('Offline Price Conflict Market');
