@@ -18,6 +18,13 @@ class SyncOfflineSaleRequest extends StoreSaleRequest
         $rules['items.*.price_snapshot'] = ['required', 'numeric', 'min:0', 'max:9999999.99', 'decimal:0,2'];
         $rules['shift_id'] = ['required', 'integer', 'min:1'];
         $rules['offline_created_at'] = ['required', 'date'];
+        // Promotional codes and manual discounts require a live checkout; offline
+        // receipts keep their regular cached catalog price until the server syncs them.
+        $rules['promotion_code'] = ['prohibited'];
+        // StoreSaleRequest normalizes a missing manual discount to '0.00', so
+        // validate that exact no-discount value here instead of using prohibited.
+        $rules['manual_discount_percent'] = ['required', 'numeric', 'min:0', 'max:0', 'decimal:0,2'];
+        $rules['expected_total'] = ['prohibited'];
 
         return $rules;
     }

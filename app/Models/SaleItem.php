@@ -11,7 +11,7 @@ class SaleItem extends Model
     use HasFactory;
 
     protected $fillable = [
-        'organization_id', 'sale_id', 'product_id', 'unit_id', 'product_sku_snapshot', 'product_name_snapshot',
+        'organization_id', 'sale_id', 'product_id', 'promotion_id', 'promotion_name_snapshot', 'unit_id', 'product_sku_snapshot', 'product_name_snapshot',
         'unit_name_snapshot', 'unit_conversion_factor_snapshot', 'quantity', 'quantity_in_base', 'unit_price',
         'unit_cost_snapshot', 'discount_amount', 'tax_amount', 'line_total',
     ];
@@ -27,6 +27,7 @@ class SaleItem extends Model
     }
 
     public function sale(): BelongsTo { return $this->belongsTo(Sale::class); }
+    public function promotion(): BelongsTo { return $this->belongsTo(Promotion::class); }
     public function product(): BelongsTo { return $this->belongsTo(Product::class); }
     public function unit(): BelongsTo { return $this->belongsTo(Unit::class); }
 }

@@ -66,7 +66,7 @@ class SaleController extends Controller
                 'branch:id,name,code',
                 'cashier:id,name',
                 'customer:id,name,phone',
-                'items:id,organization_id,sale_id,product_id,product_sku_snapshot,product_name_snapshot,unit_name_snapshot,quantity,unit_price,line_total',
+                'items:id,organization_id,sale_id,product_id,promotion_id,promotion_name_snapshot,discount_amount,product_sku_snapshot,product_name_snapshot,unit_name_snapshot,quantity,unit_price,line_total',
                 'payments:id,organization_id,sale_id,payment_method,amount,payment_reference',
             ])
             ->findOrFail($saleId);
@@ -87,6 +87,8 @@ class SaleController extends Controller
                 'total' => $sale->total,
                 'subtotal' => $sale->subtotal,
                 'discountTotal' => $sale->discount_total,
+                'promotionCode' => $sale->promotion_code_snapshot,
+                'manualDiscountPercent' => $sale->manual_discount_percent ?? '0.00',
                 'taxTotal' => $sale->tax_total,
                 'branch' => $sale->branch?->only(['id', 'name', 'code']),
                 'cashier' => $sale->cashier?->only(['id', 'name']),
@@ -98,6 +100,8 @@ class SaleController extends Controller
                     'unitName' => $item->unit_name_snapshot,
                     'quantity' => $item->quantity,
                     'unitPrice' => $item->unit_price,
+                    'discountAmount' => $item->discount_amount,
+                    'promotionName' => $item->promotion_name_snapshot,
                     'lineTotal' => $item->line_total,
                 ])->values(),
                 'payments' => $sale->payments->map(static fn ($payment): array => [
@@ -123,7 +127,7 @@ class SaleController extends Controller
                 'branch:id,name,code',
                 'cashier:id,name',
                 'customer:id,name,phone',
-                'items:id,organization_id,sale_id,product_id,product_sku_snapshot,product_name_snapshot,unit_name_snapshot,quantity,unit_price,unit_cost_snapshot,line_total',
+                'items:id,organization_id,sale_id,product_id,promotion_id,promotion_name_snapshot,discount_amount,product_sku_snapshot,product_name_snapshot,unit_name_snapshot,quantity,unit_price,unit_cost_snapshot,line_total',
                 'payments:id,organization_id,sale_id,payment_method,amount,payment_reference',
             ])
             ->findOrFail($saleId);
@@ -157,6 +161,8 @@ class SaleController extends Controller
                 'total' => $sale->total,
                 'subtotal' => $sale->subtotal,
                 'discountTotal' => $sale->discount_total,
+                'promotionCode' => $sale->promotion_code_snapshot,
+                'manualDiscountPercent' => $sale->manual_discount_percent ?? '0.00',
                 'taxTotal' => $sale->tax_total,
                 'branch' => $sale->branch?->only(['id', 'name', 'code']),
                 'cashier' => $sale->cashier?->only(['id', 'name']),
@@ -169,6 +175,8 @@ class SaleController extends Controller
                     'quantity' => $item->quantity,
                     'availableQuantity' => DecimalQuantity::fromMilli(max(0, DecimalQuantity::toMilli((string) $item->quantity) - DecimalQuantity::toMilli((string) ($returnedQuantities->get($item->getKey()) ?? '0.000')))),
                     'unitPrice' => $item->unit_price,
+                    'discountAmount' => $item->discount_amount,
+                    'promotionName' => $item->promotion_name_snapshot,
                     'lineTotal' => $item->line_total,
                 ])->values(),
                 'payments' => $sale->payments->map(static fn ($payment): array => [

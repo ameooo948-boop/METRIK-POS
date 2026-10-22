@@ -79,6 +79,14 @@ class OrganizationPolicy
             && OrganizationRole::tryFrom($role)?->canManageSupplierPayments() === true;
     }
 
+    public function managePromotions(User $user, Organization $organization): bool
+    {
+        $role = $this->roleFor($user, $organization);
+
+        return $role !== null
+            && OrganizationRole::tryFrom($role)?->canManagePromotions() === true;
+    }
+
     public function usePos(User $user, Organization $organization): bool
     {
         $role = $this->roleFor($user, $organization);

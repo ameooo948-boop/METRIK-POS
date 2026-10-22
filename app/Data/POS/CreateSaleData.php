@@ -16,6 +16,9 @@ final readonly class CreateSaleData
         public ?int $expectedCashShiftId = null,
         public ?string $offlineCreatedAt = null,
         public ?int $customerId = null,
+        public ?string $promotionCode = null,
+        public string $manualDiscountPercent = '0.00',
+        public ?string $expectedTotal = null,
     ) {}
 
     /** @param array<string, mixed> $data */
@@ -50,6 +53,9 @@ final readonly class CreateSaleData
             expectedCashShiftId: $expectedCashShiftId,
             offlineCreatedAt: $offlineCreatedAt,
             customerId: isset($data['customer_id']) && $data['customer_id'] !== '' ? (int) $data['customer_id'] : null,
+            promotionCode: $offlineCreatedAt === null && isset($data['promotion_code']) && trim((string) $data['promotion_code']) !== '' ? strtoupper(trim((string) $data['promotion_code'])) : null,
+            manualDiscountPercent: $offlineCreatedAt === null && isset($data['manual_discount_percent']) && trim((string) $data['manual_discount_percent']) !== '' ? (string) $data['manual_discount_percent'] : '0.00',
+            expectedTotal: $offlineCreatedAt === null && isset($data['expected_total']) && trim((string) $data['expected_total']) !== '' ? (string) $data['expected_total'] : null,
         );
     }
 }

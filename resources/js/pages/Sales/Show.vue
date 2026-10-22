@@ -68,12 +68,14 @@ function submitReturn() {
                     <div class="overflow-x-auto">
                         <table class="w-full min-w-[500px] text-right text-sm">
                             <thead><tr class="border-b border-slate-200 text-slate-500"><th class="pb-3 font-medium">الصنف</th><th class="pb-3 font-medium">الكمية</th><th class="pb-3 font-medium">سعر الوحدة</th><th class="pb-3 text-left font-medium">الإجمالي</th></tr></thead>
-                            <tbody><tr v-for="item in sale.items" :key="item.id" class="border-b border-slate-100"><td class="py-4"><p class="font-semibold">{{ item.name }}</p><p class="mt-1 text-xs text-slate-500">{{ item.sku }}</p></td><td class="py-4">{{ Number(item.quantity).toLocaleString('ar-EG', { maximumFractionDigits: 3 }) }} {{ item.unitName }}</td><td class="py-4">{{ money(item.unitPrice) }}</td><td class="py-4 text-left font-semibold">{{ money(item.lineTotal) }} ج.م</td></tr></tbody>
+                            <tbody><tr v-for="item in sale.items" :key="item.id" class="border-b border-slate-100"><td class="py-4"><p class="font-semibold">{{ item.name }}</p><p class="mt-1 text-xs text-slate-500">{{ item.sku }}</p><p v-if="item.promotionName && Number(item.discountAmount) > 0" class="mt-1 text-xs text-emerald-700">{{ item.promotionName }} · خصم {{ money(item.discountAmount) }} ج.م</p><p v-else-if="Number(item.discountAmount) > 0" class="mt-1 text-xs text-emerald-700">خصم {{ money(item.discountAmount) }} ج.م</p></td><td class="py-4">{{ Number(item.quantity).toLocaleString('ar-EG', { maximumFractionDigits: 3 }) }} {{ item.unitName }}</td><td class="py-4">{{ money(item.unitPrice) }}</td><td class="py-4 text-left font-semibold">{{ money(item.lineTotal) }} ج.م</td></tr></tbody>
                         </table>
                     </div>
                     <div class="mr-auto mt-6 max-w-sm space-y-3 text-sm">
                         <div class="flex justify-between gap-3"><span class="text-slate-500">الإجمالي الفرعي</span><span>{{ money(sale.subtotal) }} ج.م</span></div>
                         <div class="flex justify-between gap-3"><span class="text-slate-500">الخصم</span><span>{{ money(sale.discountTotal) }} ج.م</span></div>
+                        <div v-if="sale.promotionCode" class="flex justify-between gap-3"><span class="text-slate-500">كوبون العرض</span><span class="font-mono">{{ sale.promotionCode }}</span></div>
+                        <div v-if="Number(sale.manualDiscountPercent || 0) > 0" class="flex justify-between gap-3"><span class="text-slate-500">نسبة الخصم اليدوي</span><span>{{ sale.manualDiscountPercent }}%</span></div>
                         <div class="flex justify-between gap-3"><span class="text-slate-500">الضريبة</span><span>{{ money(sale.taxTotal) }} ج.م</span></div>
                         <div class="flex justify-between gap-3 border-t border-slate-200 pt-4 text-lg font-black"><span>إجمالي الفاتورة الأصلية</span><span>{{ money(sale.total) }} ج.م</span></div>
                     </div>

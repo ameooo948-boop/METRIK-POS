@@ -26,6 +26,10 @@ const props = defineProps({
     initialCustomers: { type: Array, required: true },
     recentSales: { type: Array, required: true },
     canViewSales: { type: Boolean, required: true },
+    activePromotions: { type: Array, default: () => [] },
+    hasActivePromotions: { type: Boolean, default: false },
+    manualDiscountLimitPercent: { type: Number, default: 0 },
+    canManagePromotions: { type: Boolean, default: false },
     flashMessage: { type: String, default: null },
     errorMessage: { type: String, default: null },
 });
@@ -63,6 +67,9 @@ const checkoutForm = useForm({
     client_operation_uuid: createOperationUuid(),
     payment_method: 'cash',
     customer_id: null,
+    promotion_code: '',
+    manual_discount_percent: '0.00',
+    expected_total: null,
     notes: '',
     items: [],
 });
@@ -148,12 +155,116 @@ function addToCart(product, requestedUnitId = null) {
         cart.value.push({ product, quantity: '1.000', unitId: Number(targetUnit.id) });
     }
 }
-const totalCents = computed(() => cart.value.reduce((sum, line) => {
-    const quantityMilli = Math.round(Number(line.quantity) * 1000);
-    const priceCents = Math.round(Number(lineUnit(line).sellingPrice) * 100);
-    return sum + Math.floor((quantityMilli * priceCents + 500) / 1000);
-}, 0));
+function roundPercentCents(amountCents, percent) {
+    const basisPoints = Math.round(Number(percent || 0) * 100);
+    return Math.min(amountCents, Math.floor((amountCents * basisPoints + 5000) / 10000));
+}
+
+const cartPricing = computed(() => {
+    const lines = cart.value.map((line) => {
+        const quantityMilli = Math.round(Number(line.quantity) * 1000);
+        const priceCents = Math.round(Number(lineUnit(line).sellingPrice) * 100);
+        return {
+            productId: Number(line.product.id),
+            unitId: Number(line.unitId ?? line.product.baseUnitId),
+            quantityMilli,
+            priceCents,
+            grossCents: Math.floor((quantityMilli * priceCents + 500) / 1000),
+            promotionDiscountCents: 0,
+            manualDiscountCents: 0,
+            promotionId: null,
+            promotionName: null,
+        };
+    });
+    const code = String(checkoutForm.promotion_code || '').trim().toUpperCase();
+
+    // Discounts are disabled while offline: local sales retain the catalog price,
+    // and the server never retroactively applies a promotion to money already taken.
+    if (isConnected.value) {
+        const promotions = [...(props.activePromotions || [])]
+            .filter((promotion) => !promotion.code || (code && String(promotion.code).toUpperCase() === code))
+            .sort((a, b) => {
+                const aCode = code && String(a.code || '').toUpperCase() === code ? 0 : 1;
+                const bCode = code && String(b.code || '').toUpperCase() === code ? 0 : 1;
+                return (aCode - bCode) || (Number(a.priority || 100) - Number(b.priority || 100)) || (Number(a.id) - Number(b.id));
+            });
+
+        for (const promotion of promotions) {
+            const productIds = [...new Set((promotion.productIds || []).map(Number))];
+            if (!productIds.length) continue;
+            const lineByProduct = new Map(lines.map((line) => [line.productId, line]));
+            let didApply = false;
+
+            if (promotion.type === 'buy_x_get_y' && productIds.length === 1) {
+                const line = lineByProduct.get(productIds[0]);
+                const buy = Math.max(0, Number(promotion.buyQuantity || 0));
+                const free = Math.max(0, Number(promotion.freeQuantity || 0));
+                if (line && line.promotionId === null && line.unitId === Number(promotion.unitId) && buy > 0 && free > 0) {
+                    const cycles = Math.floor(line.quantityMilli / ((buy + free) * 1000));
+                    const freeMilli = cycles * free * 1000;
+                    const discount = Math.min(line.grossCents, Math.floor((freeMilli * line.priceCents + 500) / 1000));
+                    if (discount > 0) {
+                        line.promotionDiscountCents = discount;
+                        line.promotionId = Number(promotion.id);
+                        line.promotionName = String(promotion.name || 'عرض');
+                        didApply = true;
+                    }
+                }
+            } else if (promotion.type === 'product_percentage') {
+                const basis = Number(promotion.discountPercent || 0);
+                for (const line of lines) {
+                    if (!productIds.includes(line.productId) || line.promotionId !== null) continue;
+                    if (promotion.unitId !== null && promotion.unitId !== undefined && line.unitId !== Number(promotion.unitId)) continue;
+                    const discount = roundPercentCents(line.grossCents, basis);
+                    if (discount > 0) {
+                        line.promotionDiscountCents = discount;
+                        line.promotionId = Number(promotion.id);
+                        line.promotionName = String(promotion.name || 'عرض');
+                        didApply = true;
+                    }
+                }
+            } else if (promotion.type === 'bundle_percentage') {
+                const allPresent = productIds.every((id) => lineByProduct.has(id));
+                const noEarlierPromotion = productIds.every((id) => lineByProduct.get(id)?.promotionId === null);
+                if (allPresent && noEarlierPromotion) {
+                    for (const id of productIds) {
+                        const line = lineByProduct.get(id);
+                        const discount = roundPercentCents(line.grossCents, Number(promotion.discountPercent || 0));
+                        if (discount <= 0) continue;
+                        line.promotionDiscountCents = discount;
+                        line.promotionId = Number(promotion.id);
+                        line.promotionName = String(promotion.name || 'عرض مجموعة');
+                        didApply = true;
+                    }
+                }
+            }
+
+            // A specified coupon that does not match a live eligible promotion is
+            // rejected by the server; this estimate simply remains un-discounted.
+            void didApply;
+        }
+
+        const manualPercent = Math.min(Number(props.manualDiscountLimitPercent || 0), Math.max(0, Number(checkoutForm.manual_discount_percent || 0)));
+        for (const line of lines) {
+            const afterPromotion = line.grossCents - line.promotionDiscountCents;
+            line.manualDiscountCents = roundPercentCents(afterPromotion, manualPercent);
+        }
+    }
+
+    const subtotalCents = lines.reduce((sum, line) => sum + line.grossCents, 0);
+    const promotionDiscountCents = lines.reduce((sum, line) => sum + line.promotionDiscountCents, 0);
+    const manualDiscountCents = lines.reduce((sum, line) => sum + line.manualDiscountCents, 0);
+    const discountTotalCents = promotionDiscountCents + manualDiscountCents;
+    const totalCents = lines.reduce((sum, line) => sum + line.grossCents - line.promotionDiscountCents - line.manualDiscountCents, 0);
+    return { lines, subtotalCents, promotionDiscountCents, manualDiscountCents, discountTotalCents, totalCents };
+});
+const totalCents = computed(() => cartPricing.value.totalCents);
 const estimatedTotal = computed(() => (totalCents.value / 100).toFixed(2));
+const estimatedSubtotal = computed(() => (cartPricing.value.subtotalCents / 100).toFixed(2));
+const estimatedDiscount = computed(() => (cartPricing.value.discountTotalCents / 100).toFixed(2));
+function linePricingFor(productId) {
+    return cartPricing.value.lines.find((line) => Number(line.productId) === Number(productId)) || null;
+}
 
 function filterCachedProducts() {
     const term = searchQuery.value.trim().toLocaleLowerCase('ar');
@@ -314,6 +425,10 @@ async function queueOfflineCheckout() {
         offlineStatusMessage.value = 'البيع دون اتصال متاح نقدًا فقط. لا تسجل بطاقة أو محفظة قبل التأكد من الدفع عبر مزود الخدمة.';
         return;
     }
+    if (String(checkoutForm.promotion_code || '').trim() !== '' || Number(checkoutForm.manual_discount_percent || 0) > 0) {
+        offlineStatusMessage.value = 'الكوبونات والخصم اليدوي يحتاجان اتصالًا بالخادم. امسح الكوبون وأعد الخصم إلى صفر أو اتصل بالإنترنت.';
+        return;
+    }
 
     const cachedById = new Map(cachedCatalog.value.map((product) => [Number(product.id), product]));
     for (const line of cart.value) {
@@ -387,12 +502,16 @@ async function checkout() {
         unit_id: itemUnitId(line),
         quantity: String(line.quantity),
     }));
+    checkoutForm.expected_total = estimatedTotal.value;
     checkoutForm.post('/pos/checkout', {
         preserveScroll: true,
         onSuccess: () => {
             cart.value = [];
             checkoutForm.reset('notes');
             checkoutForm.customer_id = null;
+            checkoutForm.promotion_code = '';
+            checkoutForm.manual_discount_percent = '0.00';
+            checkoutForm.expected_total = null;
             checkoutForm.items = [];
             checkoutForm.client_operation_uuid = createOperationUuid();
             offlineStatusMessage.value = '';
@@ -622,14 +741,24 @@ onBeforeUnmount(() => {
                     <div v-if="!cart.length" class="rounded-xl border border-dashed border-white/10 p-8 text-center"><p class="font-semibold">السلة فارغة</p><p class="mt-2 text-sm text-slate-500">أضف منتجًا من القائمة لتبدأ البيع.</p></div>
                     <div v-else class="space-y-3">
                         <article v-for="line in cart" :key="line.product.id" class="rounded-xl border border-white/10 bg-slate-950/70 p-4">
-                            <div class="flex items-start justify-between gap-3"><div class="min-w-0"><h3 class="font-semibold">{{ line.product.name }}</h3><p class="mt-1 text-sm text-slate-400">{{ money(lineUnit(line).sellingPrice) }} ج.م / {{ lineUnit(line).unitName }} · يعادل {{ quantity(lineBaseQuantity(line)) }} {{ line.product.unitName }}</p></div><button type="button" @click="removeFromCart(line.product.id)" class="text-sm text-rose-300 hover:text-rose-200">حذف</button></div>
+                            <div class="flex items-start justify-between gap-3"><div class="min-w-0"><h3 class="font-semibold">{{ line.product.name }}</h3><p class="mt-1 text-sm text-slate-400">{{ money(lineUnit(line).sellingPrice) }} ج.م / {{ lineUnit(line).unitName }} · يعادل {{ quantity(lineBaseQuantity(line)) }} {{ line.product.unitName }}</p><p v-if="linePricingFor(line.product.id)?.promotionName && Number(linePricingFor(line.product.id)?.promotionDiscountCents || 0) > 0" class="mt-1 text-xs text-emerald-200">{{ linePricingFor(line.product.id).promotionName }} · خصم {{ money(linePricingFor(line.product.id).promotionDiscountCents / 100) }} ج.م</p></div><button type="button" @click="removeFromCart(line.product.id)" class="text-sm text-rose-300 hover:text-rose-200">حذف</button></div>
                             <div class="mt-3 grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(140px,0.8fr)]"><div><label :for="`unit-${line.product.id}`" class="mb-1 block text-xs text-slate-400">وحدة البيع</label><select :id="`unit-${line.product.id}`" :value="line.unitId" @change="changeCartUnit(line, $event.target.value)" class="w-full rounded-lg border border-white/10 bg-slate-900 px-3 py-2 outline-none focus:border-emerald-300"><option v-for="unit in unitOptionsFor(line.product)" :key="unit.id" :value="unit.id">{{ unit.unitName }} — {{ money(unit.sellingPrice) }} ج.م</option></select></div><div><label :for="`quantity-${line.product.id}`" class="mb-1 block text-xs text-slate-400">الكمية</label><input :id="`quantity-${line.product.id}`" v-model="line.quantity" type="number" min="0.001" max="10000" step="0.001" @change="normalizeQuantity(line)" class="w-32 rounded-lg border border-white/10 bg-slate-900 px-3 py-2 outline-none focus:border-emerald-300" /></div><strong class="flex items-end text-lg">{{ money(Number(lineUnit(line).sellingPrice) * Number(line.quantity)) }} ج.م</strong></div>
                         </article>
                     </div>
                     <p v-if="checkoutForm.errors.items" class="text-sm text-rose-300" role="alert">{{ checkoutForm.errors.items }}</p>
                     <div v-for="(line, index) in cart" :key="`error-${line.product.id}`"><p v-if="checkoutForm.errors[`items.${index}.quantity`]" class="text-sm text-rose-300">{{ line.product.name }}: {{ checkoutForm.errors[`items.${index}.quantity`] }}</p></div>
                     <div class="space-y-3 border-t border-white/10 pt-5">
-                        <div class="flex items-center justify-between gap-4 text-slate-400"><span>عدد الأصناف</span><span>{{ cart.length }}</span></div><div class="flex items-center justify-between gap-4 text-xl font-black"><span>الإجمالي</span><span class="text-emerald-200">{{ money(estimatedTotal) }} ج.م</span></div>
+                        <div class="flex items-center justify-between gap-4 text-slate-400"><span>عدد الأصناف</span><span>{{ cart.length }}</span></div>
+                        <div class="flex items-center justify-between gap-4 text-slate-400"><span>المجموع قبل الخصم</span><span>{{ money(estimatedSubtotal) }} ج.م</span></div>
+                        <div v-if="Number(estimatedDiscount) > 0" class="flex items-center justify-between gap-4 text-emerald-200"><span>إجمالي الخصومات</span><span>- {{ money(estimatedDiscount) }} ج.م</span></div>
+                        <div class="flex items-center justify-between gap-4 border-t border-white/10 pt-3 text-xl font-black"><span>الإجمالي النهائي</span><span class="text-emerald-200">{{ money(estimatedTotal) }} ج.م</span></div>
+                        <div class="space-y-3 rounded-xl border border-white/10 bg-slate-950/50 p-3">
+                            <div><label for="promotion-code" class="mb-1 block text-sm font-medium">كوبون خصم (اختياري)</label><input id="promotion-code" v-model="checkoutForm.promotion_code" maxlength="40" autocomplete="off" :disabled="!isConnected" class="w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2.5 uppercase outline-none focus:border-emerald-300 disabled:opacity-50" placeholder="مثال: SAVE10" /><p v-if="checkoutForm.errors.promotion_code" class="mt-1 text-sm text-rose-300" role="alert">{{ checkoutForm.errors.promotion_code }}</p></div>
+                            <div v-if="manualDiscountLimitPercent > 0"><label for="manual-discount-percent" class="mb-1 block text-sm font-medium">خصم يدوي (%) — الحد الأقصى {{ manualDiscountLimitPercent }}%</label><input id="manual-discount-percent" v-model="checkoutForm.manual_discount_percent" type="number" min="0" :max="manualDiscountLimitPercent" step="0.01" :disabled="!isConnected" class="w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2.5 outline-none focus:border-emerald-300 disabled:opacity-50" /><p v-if="checkoutForm.errors.manual_discount_percent" class="mt-1 text-sm text-rose-300" role="alert">{{ checkoutForm.errors.manual_discount_percent }}</p></div>
+                            <p v-else class="text-xs text-slate-400">لا توجد صلاحية للخصم اليدوي لدورك. العروض المعتمدة تُطبق تلقائيًا.</p>
+                            <p v-if="!isConnected && hasActivePromotions" class="text-xs leading-5 text-amber-200">أنت تعمل دون اتصال: لن تُطبق العروض التلقائية أو الكوبونات في البيع المحلي. اتصل بالخادم لتأكيد الأسعار الترويجية.</p>
+                            <p v-if="canManagePromotions" class="text-xs"><Link href="/promotions" class="text-emerald-200 hover:underline">إدارة العروض والكوبونات ←</Link></p>
+                        </div>
                         <div class="space-y-2 rounded-xl border border-white/10 bg-slate-950/50 p-3">
                             <label for="customer-search" class="block text-sm font-medium">ربط الفاتورة بعميل (اختياري)</label>
                             <div class="flex gap-2"><input id="customer-search" v-model="customerSearchQuery" maxlength="100" @keydown.enter.prevent="findCustomers" class="min-w-0 flex-1 rounded-lg border border-white/10 bg-slate-950 px-3 py-2.5 outline-none focus:border-emerald-300" placeholder="اسم العميل أو الهاتف أو الكود" /><button type="button" @click="findCustomers" :disabled="isSearchingCustomers" class="rounded-lg border border-white/10 px-3 py-2 text-sm disabled:opacity-50">{{ isSearchingCustomers ? 'بحث...' : 'بحث' }}</button></div>

@@ -8,6 +8,7 @@ use App\Models\CashShift;
 use App\Models\Customer;
 use App\Models\Organization;
 use App\Models\Product;
+use App\Models\Promotion;
 use App\Models\Sale;
 use App\Support\ProductUnitOptions;
 use Illuminate\Http\JsonResponse;
@@ -38,6 +39,33 @@ class PointOfSaleController extends Controller
             ->first();
 
         $role = OrganizationRole::tryFrom((string) $request->attributes->get('currentOrganizationRole'));
+        $activePromotions = Promotion::query()
+            ->forOrganization((int) $organization->getKey())
+            ->where('is_active', true)
+            ->where(function ($query) use ($branch): void {
+                $query->whereNull('branch_id')->orWhere('branch_id', $branch->getKey());
+            })
+            ->where(function ($query): void {
+                $query->whereNull('starts_at')->orWhere('starts_at', '<=', now());
+            })
+            ->where(function ($query): void {
+                $query->whereNull('ends_at')->orWhere('ends_at', '>=', now());
+            })
+            ->with(['products:id,organization_id,name,sku', 'unit:id,name_ar,name_en'])
+            ->orderBy('priority')->orderBy('id')->get()
+            ->map(static fn (Promotion $promotion): array => [
+                'id' => (int) $promotion->getKey(),
+                'name' => (string) $promotion->name,
+                'code' => $promotion->code,
+                'type' => (string) $promotion->type,
+                'productIds' => $promotion->products->filter(static fn ($product): bool => (int) $product->organization_id === (int) $promotion->organization_id)
+                    ->pluck('id')->map(static fn ($id): int => (int) $id)->values()->all(),
+                'unitId' => $promotion->unit_id ? (int) $promotion->unit_id : null,
+                'buyQuantity' => (int) ($promotion->buy_quantity ?? 0),
+                'freeQuantity' => (int) ($promotion->free_quantity ?? 0),
+                'discountPercent' => (string) ($promotion->discount_percent ?? '0.00'),
+                'priority' => (int) $promotion->priority,
+            ])->values()->all();
         $sales = Sale::query()
             ->forOrganization((int) $organization->getKey())
             ->where('branch_id', $branch->getKey())
@@ -76,6 +104,10 @@ class PointOfSaleController extends Controller
                 'openedAt' => $shift->opened_at?->format('Y-m-d H:i'),
             ] : null,
             'initialCustomers' => $initialCustomers,
+            'activePromotions' => $activePromotions,
+            'hasActivePromotions' => $activePromotions !== [],
+            'manualDiscountLimitPercent' => $role?->manualDiscountLimitPercent() ?? 0,
+            'canManagePromotions' => $request->user()->can('managePromotions', $organization),
             'initialProducts' => $this->searchProductsData((int) $organization->getKey(), (int) $branch->getKey(), '', 24),
             'offlineContext' => [
                 'organizationId' => (int) $organization->getKey(),

@@ -3,6 +3,7 @@
 namespace App\Services\POS;
 
 use App\Data\POS\CreateSaleData;
+use App\Enums\OrganizationRole;
 use App\Models\Branch;
 use App\Models\CashMovement;
 use App\Models\CashShift;
@@ -12,6 +13,7 @@ use App\Models\InventoryBalance;
 use App\Models\InventoryLot;
 use App\Models\InventoryMovement;
 use App\Models\Product;
+use App\Models\Promotion;
 use App\Models\Sale;
 use App\Models\SaleItem;
 use App\Models\SalePayment;
@@ -252,11 +254,66 @@ class CheckoutSale
                     ]);
                 }
 
+                // Offline transactions intentionally use the cached catalog price without
+                // automatic promotions or manual discounts. This avoids changing the amount
+                // already charged to the customer while the device was disconnected.
+                $promotionQuery = Promotion::query()
+                    ->forOrganization($data->organizationId)
+                    ->where('is_active', true)
+                    ->where(function ($query) use ($branch): void {
+                        $query->whereNull('branch_id')->orWhere('branch_id', $branch->getKey());
+                    })
+                    ->where(function ($query): void {
+                        $query->whereNull('starts_at')->orWhere('starts_at', '<=', now());
+                    })
+                    ->where(function ($query): void {
+                        $query->whereNull('ends_at')->orWhere('ends_at', '>=', now());
+                    })
+                    ->where(function ($query) use ($data): void {
+                        $query->whereNull('code');
+                        if ($data->promotionCode !== null) {
+                            $query->orWhereRaw('UPPER(code) = ?', [strtoupper($data->promotionCode)]);
+                        }
+                    })
+                    ->with(['products:id,organization_id,name,sku', 'unit:id,name_ar,name_en'])
+                    ->orderBy('priority')->orderBy('id');
+                $promotions = $data->offlineCreatedAt === null ? $promotionQuery->get() : collect();
+
+                $membershipRole = DB::table('organization_user')
+                    ->where('organization_id', $data->organizationId)
+                    ->where('user_id', $data->cashierId)
+                    ->value('role');
+                $manualDiscountLimit = OrganizationRole::tryFrom((string) $membershipRole)?->manualDiscountLimitPercent() ?? 0;
+                $pricing = (new PromotionPricing())->apply(
+                    $preparedItems,
+                    $promotions,
+                    $data->organizationId,
+                    $data->offlineCreatedAt === null ? $data->promotionCode : null,
+                    $data->offlineCreatedAt === null ? $data->manualDiscountPercent : '0.00',
+                    $manualDiscountLimit,
+                );
+                $preparedItems = $pricing['items'];
+                $subtotalCents = $pricing['subtotalCents'];
+                $discountTotalCents = $pricing['discountTotalCents'];
+                $totalCents = $pricing['totalCents'];
+
+                if ($totalCents <= 0 || $totalCents > 99_999_999_999_999) {
+                    throw ValidationException::withMessages([
+                        'items' => 'يجب أن يكون إجمالي الفاتورة بعد الخصومات أكبر من صفر وضمن الحد المسموح به.',
+                    ]);
+                }
+
+                if ($data->expectedTotal !== null && DecimalMoney::toCents($data->expectedTotal) !== $totalCents) {
+                    throw ValidationException::withMessages([
+                        'expected_total' => 'تغير الإجمالي بسبب تحديث سعر أو عرض ترويجي. لم يتم تسجيل البيع؛ حدّث شاشة نقطة البيع وراجع المبلغ المطلوب من العميل.',
+                    ]);
+                }
+
                 $customerBalanceAfterCents = null;
                 if ($isCreditSale && $customer) {
                     $currentCustomerBalanceCents = DecimalMoney::toCents((string) $customer->balance);
                     $customerCreditLimitCents = DecimalMoney::toCents((string) $customer->credit_limit);
-                    $customerBalanceAfterCents = $currentCustomerBalanceCents + $subtotalCents;
+                    $customerBalanceAfterCents = $currentCustomerBalanceCents + $totalCents;
 
                     if ($customerCreditLimitCents <= 0 || $customerBalanceAfterCents > $customerCreditLimitCents) {
                         throw ValidationException::withMessages([
@@ -275,9 +332,11 @@ class CheckoutSale
                     'client_operation_uuid' => $data->clientOperationUuid,
                     'status' => $isCreditSale ? 'due' : 'paid',
                     'subtotal' => DecimalMoney::fromCents($subtotalCents),
-                    'discount_total' => '0.00',
+                    'discount_total' => DecimalMoney::fromCents($discountTotalCents),
+                    'promotion_code_snapshot' => $data->offlineCreatedAt === null ? $data->promotionCode : null,
+                    'manual_discount_percent' => $data->offlineCreatedAt === null ? $data->manualDiscountPercent : '0.00',
                     'tax_total' => '0.00',
-                    'total' => DecimalMoney::fromCents($subtotalCents),
+                    'total' => DecimalMoney::fromCents($totalCents),
                     'notes' => $data->notes,
                     'sold_at' => now(),
                     'offline_created_at' => $data->offlineCreatedAt,
@@ -296,6 +355,8 @@ class CheckoutSale
                         'organization_id' => $data->organizationId,
                         'sale_id' => $sale->getKey(),
                         'product_id' => $product->getKey(),
+                        'promotion_id' => $item['promotion_id'],
+                        'promotion_name_snapshot' => $item['promotion_name'],
                         'unit_id' => $item['unit']['persistedId'],
                         'product_sku_snapshot' => $product->sku,
                         'product_name_snapshot' => $product->name,
@@ -305,9 +366,9 @@ class CheckoutSale
                         'quantity_in_base' => DecimalQuantity::fromMilli($item['base_quantity_milli']),
                         'unit_price' => $unitPrice,
                         'unit_cost_snapshot' => $unitCost,
-                        'discount_amount' => '0.00',
+                        'discount_amount' => DecimalMoney::fromCents($item['discount_cents']),
                         'tax_amount' => '0.00',
-                        'line_total' => $lineTotal,
+                        'line_total' => DecimalMoney::fromCents($item['net_line_total_cents']),
                     ]);
 
                     $newMilli = $balances[(int) $product->getKey()]['new_milli'];
@@ -351,7 +412,7 @@ class CheckoutSale
                     ]);
                 }
 
-                $total = DecimalMoney::fromCents($subtotalCents);
+                $total = DecimalMoney::fromCents($totalCents);
                 if ($isCreditSale && $customer && $customerBalanceAfterCents !== null) {
                     CustomerAccountTransaction::query()->create([
                         'organization_id' => $data->organizationId,
@@ -454,8 +515,17 @@ class CheckoutSale
             ->where('transaction_type', 'sale')
             ->exists();
         $savedPaymentMethod = $wasCreditSale ? 'credit' : $existing->payments->first()?->payment_method;
+        $savedPromotionCode = strtoupper(trim((string) ($existing->promotion_code_snapshot ?? '')));
+        $requestedPromotionCode = $data->offlineCreatedAt !== null ? '' : strtoupper(trim((string) ($data->promotionCode ?? '')));
+        $savedManualDiscount = DecimalMoney::toCents((string) ($existing->manual_discount_percent ?? '0.00'));
+        $requestedManualDiscount = DecimalMoney::toCents($data->offlineCreatedAt !== null ? '0.00' : $data->manualDiscountPercent);
+        $expectedTotalMismatch = $data->expectedTotal !== null
+            && DecimalMoney::toCents($data->expectedTotal) !== DecimalMoney::toCents((string) $existing->total);
         if ($requestedItems !== $savedItems || $savedPaymentMethod !== $data->paymentMethod
-            || (int) ($existing->customer_id ?? 0) !== (int) ($data->customerId ?? 0)) {
+            || (int) ($existing->customer_id ?? 0) !== (int) ($data->customerId ?? 0)
+            || $savedPromotionCode !== $requestedPromotionCode
+            || $savedManualDiscount !== $requestedManualDiscount
+            || $expectedTotalMismatch) {
             throw ValidationException::withMessages([
                 'client_operation_uuid' => 'تم استخدام معرّف العملية سابقًا مع سلة أو طريقة دفع مختلفة. أعد المحاولة بمعرّف جديد.',
             ]);

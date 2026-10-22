@@ -63,7 +63,7 @@ function printReceipt() {
                 </thead>
                 <tbody>
                     <tr v-for="item in sale.items" :key="item.id">
-                        <td class="item-name"><span>{{ item.name }}</span><small v-if="item.sku">{{ item.sku }}</small></td>
+                        <td class="item-name"><span>{{ item.name }}</span><small v-if="item.sku">{{ item.sku }}</small><small v-if="item.promotionName && Number(item.discountAmount) > 0">{{ item.promotionName }} · خصم {{ money(item.discountAmount) }}</small><small v-else-if="Number(item.discountAmount) > 0">خصم {{ money(item.discountAmount) }}</small></td>
                         <td class="number-cell">{{ quantity(item.quantity) }}<small v-if="item.unitName">{{ item.unitName }}</small></td>
                         <td class="number-cell">{{ money(item.unitPrice) }}</td>
                         <td class="number-cell strong-cell">{{ money(item.lineTotal) }}</td>
@@ -75,6 +75,8 @@ function printReceipt() {
             <section class="totals">
                 <div class="info-row"><span>الإجمالي الفرعي</span><strong>{{ money(sale.subtotal) }} {{ currencyLabel }}</strong></div>
                 <div class="info-row"><span>الخصم</span><strong>{{ money(sale.discountTotal) }} {{ currencyLabel }}</strong></div>
+                <div v-if="sale.promotionCode" class="info-row"><span>كوبون العرض</span><strong>{{ sale.promotionCode }}</strong></div>
+                <div v-if="Number(sale.manualDiscountPercent || 0) > 0" class="info-row"><span>نسبة الخصم اليدوي</span><strong>{{ sale.manualDiscountPercent }}%</strong></div>
                 <div class="info-row"><span>الضريبة</span><strong>{{ money(sale.taxTotal) }} {{ currencyLabel }}</strong></div>
                 <div class="info-row total-row"><span>الإجمالي</span><strong>{{ money(sale.total) }} {{ currencyLabel }}</strong></div>
                 <div class="info-row"><span>المحصّل</span><strong>{{ money(sale.paidTotal) }} {{ currencyLabel }}</strong></div>

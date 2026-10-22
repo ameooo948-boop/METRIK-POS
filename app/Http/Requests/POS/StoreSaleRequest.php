@@ -24,6 +24,9 @@ class StoreSaleRequest extends FormRequest
             'client_operation_uuid' => strtolower(trim((string) $this->input('client_operation_uuid', ''))),
             'payment_method' => trim((string) $this->input('payment_method', 'cash')),
             'notes' => trim((string) $this->input('notes', '')) ?: null,
+            'promotion_code' => strtoupper(trim((string) $this->input('promotion_code', ''))) ?: null,
+            'manual_discount_percent' => trim((string) $this->input('manual_discount_percent', '0.00')) ?: '0.00',
+            'expected_total' => trim((string) $this->input('expected_total', '')) ?: null,
         ]);
 
         $items = $this->input('items');
@@ -55,6 +58,9 @@ class StoreSaleRequest extends FormRequest
                     ->whereNull('deleted_at')),
             ],
             'notes' => ['nullable', 'string', 'max:1000'],
+            'promotion_code' => ['nullable', 'string', 'max:40', 'regex:/^[A-Za-z0-9_-]+$/'],
+            'manual_discount_percent' => ['nullable', 'numeric', 'min:0', 'max:100', 'decimal:0,2'],
+            'expected_total' => ['nullable', 'numeric', 'min:0', 'max:999999999999.99', 'decimal:0,2'],
             'items' => ['required', 'array', 'min:1', 'max:60'],
             'items.*' => ['required', 'array:product_id,quantity,unit_id'],
             'items.*.unit_id' => ['nullable', 'integer', Rule::exists('units', 'id')],
@@ -75,6 +81,9 @@ class StoreSaleRequest extends FormRequest
             'client_operation_uuid' => 'معرّف عملية البيع',
             'payment_method' => 'طريقة الدفع',
             'customer_id' => 'العميل',
+            'promotion_code' => 'كود العرض',
+            'manual_discount_percent' => 'نسبة الخصم اليدوي',
+            'expected_total' => 'الإجمالي المتوقع',
             'items' => 'أصناف الفاتورة',
             'items.*.product_id' => 'المنتج',
             'items.*.unit_id' => 'وحدة القياس',

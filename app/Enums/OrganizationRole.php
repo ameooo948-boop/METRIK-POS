@@ -86,6 +86,23 @@ enum OrganizationRole: string
         return in_array($this, [self::OWNER, self::ADMIN, self::BRANCH_MANAGER, self::ACCOUNTANT], true);
     }
 
+
+    public function canManagePromotions(): bool
+    {
+        return in_array($this, [self::OWNER, self::ADMIN, self::BRANCH_MANAGER], true);
+    }
+
+    /** Maximum manual sale discount allowed for the role. */
+    public function manualDiscountLimitPercent(): int
+    {
+        return match ($this) {
+            self::OWNER => 80,
+            self::ADMIN => 30,
+            self::BRANCH_MANAGER => 15,
+            default => 0,
+        };
+    }
+
     public function canManageExpenses(): bool
     {
         return in_array($this, [self::OWNER, self::ADMIN, self::BRANCH_MANAGER, self::ACCOUNTANT], true);
