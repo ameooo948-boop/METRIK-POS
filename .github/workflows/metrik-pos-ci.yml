@@ -8,11 +8,9 @@ on:
 permissions:
   contents: read
 
-# Keep runs for the same ref queued instead of replacing an older pending run.
-# GitHub supports up to 100 pending runs per concurrency group.
-concurrency:
-  group: metrik-pos-ci-${{ github.ref }}
-  queue: max
+# No workflow-level concurrency group is configured deliberately.
+# CI runs are isolated (temporary SQLite DB and array cache/session), so allowing
+# multiple runs to execute independently avoids concurrency-based cancellation.
 
 jobs:
   validate:

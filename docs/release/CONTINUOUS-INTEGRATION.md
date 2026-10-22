@@ -1,6 +1,6 @@
 # Metrik POS continuous integration
 
-The workflow at `.github/workflows/metrik-pos-ci.yml` runs on pushes, pull requests, and manual dispatches. The workflow uses `concurrency.queue: max` so runs for the same ref wait in a queue instead of replacing an older pending run. GitHub permits up to 100 pending runs per concurrency group; additional runs beyond that limit may be canceled. It pins the runner to `ubuntu-24.04` so the image does not change automatically during the Ubuntu 26 migration, and uses current checkout/setup-node action major versions compatible with the Node 24 runtime. It checks Composer metadata and production PHP platform requirements, installs dependencies, builds the Vue/Vite assets, runs database migrations against a temporary SQLite file, executes the Laravel test suite, and runs the strict Metrik health check.
+The workflow at `.github/workflows/metrik-pos-ci.yml` runs on pushes, pull requests, and manual dispatches. The workflow intentionally has no workflow-level concurrency group. CI runs are isolated by a temporary SQLite database plus in-memory cache/session drivers, so new pushes do not cancel older runs through this workflow’s concurrency settings. It pins the runner to `ubuntu-24.04` so the image does not change automatically during the Ubuntu 26 migration, and uses current checkout/setup-node action major versions compatible with the Node 24 runtime. It checks Composer metadata and production PHP platform requirements, installs dependencies, builds the Vue/Vite assets, runs database migrations against a temporary SQLite file, executes the Laravel test suite, and runs the strict Metrik health check.
 
 ## Environment isolation
 
@@ -25,4 +25,4 @@ Open the failed job and expand the first failing step. Fix the underlying issue 
 
 - `actions/checkout@v7` and `actions/setup-node@v7` are used to avoid the retired Node 20 action runtime. Keep GitHub Actions runner compatibility in mind if using self-hosted runners; current Node 24 actions require a sufficiently recent runner.
 - The workflow is pinned to `ubuntu-24.04` for reproducibility. Upgrade to `ubuntu-26.04` deliberately after testing this application against that image.
-- `queue: max` prevents the default behavior where a new pending run replaces an older pending run. GitHub allows at most 100 pending runs for a concurrency group.
+- The workflow deliberately omits `concurrency`: these validations have no shared mutable environment and should not cancel one another due to concurrency-group rules. If a run still reports cancellation, inspect the run-level cancellation reason and repository/organization policies; this workflow setting alone may not be the cause.
