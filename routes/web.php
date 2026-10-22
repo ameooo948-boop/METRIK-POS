@@ -1,4 +1,5 @@
 <?php
+
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\Auth\RegisteredUserController;
 use App\Http\Controllers\Branches\BranchController;
@@ -11,6 +12,7 @@ use App\Http\Controllers\Reports\ReportExportController;
 use App\Http\Controllers\Notifications\NotificationController;
 use App\Http\Controllers\Organizations\TeamMemberController;
 use App\Http\Controllers\Inventory\InventoryAdjustmentController;
+use App\Http\Controllers\Inventory\StockTransferController;
 use App\Http\Controllers\Organizations\OrganizationSetupController;
 use App\Http\Controllers\Organizations\SwitchOrganizationController;
 use App\Http\Controllers\POS\CashShiftController;
@@ -27,26 +29,28 @@ use App\Http\Middleware\ResolveOrganizationContext;
 use App\Http\Middleware\RequestLogContext;
 use App\Http\Middleware\SecurityHeaders;
 use Illuminate\Support\Facades\Route;
+use Inertia\Inertia;
 
 Route::get('/', function () {
-    return Inertia\Inertia::render('Welcome', ['appName' => 'Metrik POS']);
+    return Inertia::render('Welcome', ['appName' => 'Metrik POS']);
 })->middleware(SecurityHeaders::class)->name('home');
 
 Route::middleware(['guest', SecurityHeaders::class])->group(function () {
     Route::get('/login', [AuthenticatedSessionController::class, 'create'])->name('login');
     Route::post('/login', [AuthenticatedSessionController::class, 'store'])->name('login.store');
-    Route::get('/register', fn () => Inertia\Inertia::render('Auth/Register'))->name('register');
-    Route::post('/register', [RegisteredUserController::class, 'store'])->middleware('throttle:6,1,register-store')->name('register.store');
+    Route::get('/register', fn () => Inertia::render('Auth/Register'))->name('register');
+    Route::post('/register', [RegisteredUserController::class, 'store'])->middleware('throttle:6,1')->name('register.store');
 });
 
 Route::middleware(['auth', SecurityHeaders::class])->group(function () {
     Route::get('/setup/organization', [OrganizationSetupController::class, 'create'])->name('organization.setup');
-    Route::post('/setup/organization', [OrganizationSetupController::class, 'store'])->middleware('throttle:6,1,organization-setup-store')->name('organization.setup.store');
+    Route::post('/setup/organization', [OrganizationSetupController::class, 'store'])->middleware('throttle:6,1')->name('organization.setup.store');
     Route::post('/organizations/{organization}/switch', SwitchOrganizationController::class)->name('organizations.switch');
     Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])->name('logout');
 
     Route::middleware([ResolveOrganizationContext::class, RequestLogContext::class])->group(function () {
         Route::get('/dashboard', DashboardController::class)->name('dashboard');
+
         Route::get('/notifications', [NotificationController::class, 'index'])->name('notifications.index');
         Route::post('/notifications/read-all', [NotificationController::class, 'markAllRead'])->name('notifications.readAll');
         Route::post('/notifications/{notificationId}/read', [NotificationController::class, 'markRead'])->name('notifications.read');
@@ -54,41 +58,43 @@ Route::middleware(['auth', SecurityHeaders::class])->group(function () {
         Route::resource('team-members', TeamMemberController::class)
             ->only(['index', 'store', 'update', 'destroy'])
             ->parameters(['team-members' => 'teamMember']);
+
         Route::get('/branches', [BranchController::class, 'index'])->name('branches.index');
-        Route::post('/branches', [BranchController::class, 'store'])->middleware('throttle:30,1,branches-store')->name('branches.store');
+        Route::post('/branches', [BranchController::class, 'store'])->middleware('throttle:30,1')->name('branches.store');
         Route::post('/branches/{branch}/switch', [BranchController::class, 'switch'])->name('branches.switch');
 
         Route::get('/products', [ProductController::class, 'index'])->name('products.index');
-        Route::post('/products', [ProductController::class, 'store'])->middleware('throttle:60,1,products-store')->name('products.store');
-        Route::post('/categories', [CategoryController::class, 'store'])->middleware('throttle:30,1,categories-store')->name('categories.store');
-        Route::post('/inventory/adjustments', [InventoryAdjustmentController::class, 'store'])->middleware('throttle:60,1,inventory-adjustments-store')->name('inventory.adjustments.store');
+        Route::post('/products', [ProductController::class, 'store'])->middleware('throttle:60,1')->name('products.store');
+        Route::post('/categories', [CategoryController::class, 'store'])->middleware('throttle:30,1')->name('categories.store');
+        Route::post('/inventory/adjustments', [InventoryAdjustmentController::class, 'store'])->middleware('throttle:60,1')->name('inventory.adjustments.store');
+        Route::get('/inventory/transfers', [StockTransferController::class, 'index'])->name('inventory.transfers.index');
+        Route::post('/inventory/transfers', [StockTransferController::class, 'store'])->name('inventory.transfers.store');
 
         Route::get('/suppliers', [SupplierController::class, 'index'])->name('suppliers.index');
-        Route::post('/suppliers', [SupplierController::class, 'store'])->middleware('throttle:30,1,suppliers-store')->name('suppliers.store');
+        Route::post('/suppliers', [SupplierController::class, 'store'])->middleware('throttle:30,1')->name('suppliers.store');
         Route::get('/purchase-invoices', [PurchaseInvoiceController::class, 'index'])->name('purchase-invoices.index');
-        Route::post('/purchase-invoices', [PurchaseInvoiceController::class, 'store'])->middleware('throttle:30,1,purchase-invoices-store')->name('purchase-invoices.store');
+        Route::post('/purchase-invoices', [PurchaseInvoiceController::class, 'store'])->middleware('throttle:30,1')->name('purchase-invoices.store');
         Route::get('/supplier-payments', [SupplierPaymentController::class, 'index'])->name('supplier-payments.index');
-        Route::post('/supplier-payments', [SupplierPaymentController::class, 'store'])->middleware('throttle:30,1,supplier-payments-store')->name('supplier-payments.store');
+        Route::post('/supplier-payments', [SupplierPaymentController::class, 'store'])->middleware('throttle:30,1')->name('supplier-payments.store');
         Route::get('/purchase-returns', [PurchaseReturnController::class, 'index'])->name('purchase-returns.index');
-        Route::post('/purchase-invoices/{purchaseInvoice}/returns', [PurchaseReturnController::class, 'store'])->whereNumber('purchaseInvoice')->middleware('throttle:30,1,purchase-returns-store')->name('purchase-invoices.returns.store');
+        Route::post('/purchase-invoices/{purchaseInvoice}/returns', [PurchaseReturnController::class, 'store'])->whereNumber('purchaseInvoice')->middleware('throttle:30,1')->name('purchase-invoices.returns.store');
 
         Route::get('/pos', [PointOfSaleController::class, 'index'])->name('pos.index');
-        Route::get('/pos/products/search', [PointOfSaleController::class, 'searchProducts'])->middleware('throttle:120,1,pos-products-search')->name('pos.products.search');
-        Route::get('/pos/offline/catalog', [PointOfSaleController::class, 'offlineCatalog'])->middleware('throttle:30,1,pos-offline-catalog')->name('pos.offline.catalog');
-        Route::post('/pos/offline/sync', OfflineSaleSyncController::class)->middleware('throttle:60,1,pos-offline-sync')->name('pos.offline.sync');
-        Route::post('/pos/shifts', [CashShiftController::class, 'open'])->middleware('throttle:20,1,pos-shifts-open')->name('pos.shifts.open');
-        Route::post('/pos/shifts/{shiftId}/close', [CashShiftController::class, 'close'])->whereNumber('shiftId')->middleware('throttle:20,1,pos-shifts-close')->name('pos.shifts.close');
-        Route::post('/pos/checkout', [SaleCheckoutController::class, 'store'])->middleware('throttle:60,1,pos-checkout')->name('pos.checkout');
-
+        Route::get('/pos/products/search', [PointOfSaleController::class, 'searchProducts'])->middleware('throttle:120,1')->name('pos.products.search');
+        Route::get('/pos/offline/catalog', [PointOfSaleController::class, 'offlineCatalog'])->middleware('throttle:30,1')->name('pos.offline.catalog');
+        Route::post('/pos/offline/sync', OfflineSaleSyncController::class)->middleware('throttle:60,1')->name('pos.offline.sync');
+        Route::post('/pos/shifts', [CashShiftController::class, 'open'])->middleware('throttle:20,1')->name('pos.shifts.open');
+        Route::post('/pos/shifts/{shiftId}/close', [CashShiftController::class, 'close'])->whereNumber('shiftId')->middleware('throttle:20,1')->name('pos.shifts.close');
+        Route::post('/pos/checkout', [SaleCheckoutController::class, 'store'])->middleware('throttle:60,1')->name('pos.checkout');
         Route::get('/sales', [SaleController::class, 'index'])->name('sales.index');
         Route::get('/sales/{saleId}', [SaleController::class, 'show'])->whereNumber('saleId')->name('sales.show');
-        Route::post('/sales/{saleId}/returns', [SaleReturnController::class, 'store'])->whereNumber('saleId')->middleware('throttle:30,1,sales-returns-store')->name('sales.returns.store');
+        Route::post('/sales/{saleId}/returns', [SaleReturnController::class, 'store'])->whereNumber('saleId')->middleware('throttle:30,1')->name('sales.returns.store');
 
         Route::get('/reports', [ReportController::class, 'index'])->name('reports.index');
-        Route::post('/reports/exports', [ReportExportController::class, 'store'])->middleware('throttle:10,1,reports-exports-store')->name('reports.exports.store');
+        Route::post('/reports/exports', [ReportExportController::class, 'store'])->middleware('throttle:10,1')->name('reports.exports.store');
         Route::get('/reports/exports/{reportExport}/download', [ReportExportController::class, 'download'])->whereNumber('reportExport')->name('reports.exports.download');
-        Route::get('/reports/export', [ReportController::class, 'export'])->middleware('throttle:30,1,reports-export-sync')->name('reports.export');
+        Route::get('/reports/export', [ReportController::class, 'export'])->middleware('throttle:30,1')->name('reports.export');
         Route::get('/expenses', [ExpenseController::class, 'index'])->name('expenses.index');
-        Route::post('/expenses', [ExpenseController::class, 'store'])->middleware('throttle:30,1,expenses-store')->name('expenses.store');
+        Route::post('/expenses', [ExpenseController::class, 'store'])->middleware('throttle:30,1')->name('expenses.store');
     });
 });
