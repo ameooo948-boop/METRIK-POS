@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Organization;
 use App\Models\Sale;
 use App\Models\SaleReturnItem;
+use App\Support\DecimalMoney;
 use App\Support\DecimalQuantity;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -51,6 +52,63 @@ class SaleController extends Controller
             'organization' => $organization->only(['id', 'name', 'currency']),
             'currentBranch' => $branch->only(['id', 'name', 'code']),
             'sales' => $sales,
+        ]);
+    }
+
+    public function receipt(Request $request, int $saleId): Response
+    {
+        /** @var Organization $organization */
+        $organization = $request->attributes->get('currentOrganization');
+        /** @var Sale $sale */
+        $sale = Sale::query()
+            ->forOrganization((int) $organization->getKey())
+            ->with([
+                'branch:id,name,code',
+                'cashier:id,name',
+                'customer:id,name,phone',
+                'items:id,organization_id,sale_id,product_id,product_sku_snapshot,product_name_snapshot,unit_name_snapshot,quantity,unit_price,line_total',
+                'payments:id,organization_id,sale_id,payment_method,amount,payment_reference',
+            ])
+            ->findOrFail($saleId);
+
+        $this->authorize('view', $sale);
+
+        $paidCents = $sale->payments->sum(static fn ($payment): int => DecimalMoney::toCents((string) $payment->amount));
+        $remainingCents = max(0, DecimalMoney::toCents((string) $sale->total) - $paidCents);
+
+        return Inertia::render('Sales/Receipt', [
+            'organization' => $organization->only(['id', 'name', 'currency']),
+            'sale' => [
+                'id' => $sale->getKey(),
+                'invoiceNumber' => $sale->invoice_number,
+                'status' => $sale->status,
+                'returnStatus' => $sale->return_status ?? 'none',
+                'soldAt' => $sale->sold_at?->format('Y-m-d H:i:s'),
+                'total' => $sale->total,
+                'subtotal' => $sale->subtotal,
+                'discountTotal' => $sale->discount_total,
+                'taxTotal' => $sale->tax_total,
+                'branch' => $sale->branch?->only(['id', 'name', 'code']),
+                'cashier' => $sale->cashier?->only(['id', 'name']),
+                'customer' => $sale->customer?->only(['id', 'name', 'phone']),
+                'items' => $sale->items->map(static fn ($item): array => [
+                    'id' => $item->getKey(),
+                    'sku' => $item->product_sku_snapshot,
+                    'name' => $item->product_name_snapshot,
+                    'unitName' => $item->unit_name_snapshot,
+                    'quantity' => $item->quantity,
+                    'unitPrice' => $item->unit_price,
+                    'lineTotal' => $item->line_total,
+                ])->values(),
+                'payments' => $sale->payments->map(static fn ($payment): array => [
+                    'id' => $payment->getKey(),
+                    'method' => $payment->payment_method,
+                    'amount' => $payment->amount,
+                    'reference' => $payment->payment_reference,
+                ])->values(),
+                'paidTotal' => DecimalMoney::fromCents($paidCents),
+                'remainingTotal' => DecimalMoney::fromCents($remainingCents),
+            ],
         ]);
     }
 

@@ -47,6 +47,7 @@ function submitReturn() {
                 <div class="flex gap-2">
                     <Link href="/pos" class="rounded-xl bg-emerald-300 px-4 py-2 text-sm font-bold text-slate-950">نقطة البيع</Link>
                     <button type="button" @click="printReceipt" class="rounded-xl border border-white/10 px-4 py-2 text-sm">طباعة الفاتورة</button>
+                    <a :href="`/sales/${sale.id}/receipt`" target="_blank" rel="noopener" class="rounded-xl border border-emerald-300/30 bg-emerald-300/10 px-4 py-2 text-sm font-semibold text-emerald-200">إيصال حراري</a>
                 </div>
             </div>
 

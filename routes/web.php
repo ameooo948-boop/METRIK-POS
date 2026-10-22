@@ -99,6 +99,7 @@ Route::middleware(['auth', SecurityHeaders::class])->group(function () {
         Route::post('/pos/checkout', [SaleCheckoutController::class, 'store'])->middleware('throttle:60,1')->name('pos.checkout');
         Route::get('/sales', [SaleController::class, 'index'])->name('sales.index');
         Route::get('/sales/{saleId}', [SaleController::class, 'show'])->whereNumber('saleId')->name('sales.show');
+        Route::get('/sales/{saleId}/receipt', [SaleController::class, 'receipt'])->whereNumber('saleId')->name('sales.receipt');
         Route::post('/sales/{saleId}/returns', [SaleReturnController::class, 'store'])->whereNumber('saleId')->middleware('throttle:30,1')->name('sales.returns.store');
 
         Route::get('/customers', [CustomerController::class, 'index'])->name('customers.index');
