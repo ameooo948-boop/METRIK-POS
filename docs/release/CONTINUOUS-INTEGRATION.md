@@ -6,7 +6,7 @@ The workflow at `.github/workflows/metrik-pos-ci.yml` runs on pushes, pull reque
 
 - The workflow creates an ephemeral `.env` from `.env.example` and generates a CI-only application key.
 - Tests and migrations use `database/ci.sqlite`; no production database credentials or GitHub secrets are required.
-- Cache uses the `file` store and the queue uses Laravel's `database` driver. The workflow does not require a running Redis service.
+- Cache and session use Laravel's in-memory `array` drivers for test isolation; this prevents rate-limit counters from leaking between test cases. The queue uses Laravel's `database` driver. The workflow does not require a running Redis service.
 - The workflow does not deploy the application or publish artifacts to a production server.
 
 ## Before relying on the workflow
