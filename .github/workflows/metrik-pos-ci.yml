@@ -8,16 +8,16 @@ on:
 permissions:
   contents: read
 
-# Keep the running validation job alive when a newer push starts another run.
-# GitHub may replace a pending run, but it will not cancel the active run.
+# Keep runs for the same ref queued instead of replacing an older pending run.
+# GitHub supports up to 100 pending runs per concurrency group.
 concurrency:
   group: metrik-pos-ci-${{ github.ref }}
-  cancel-in-progress: false
+  queue: max
 
 jobs:
   validate:
     name: Validate Laravel and Vue application
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
 
     env:
@@ -36,7 +36,7 @@ jobs:
 
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up PHP
         uses: shivammathur/setup-php@v2
@@ -47,7 +47,7 @@ jobs:
           tools: composer:v2
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: '22'
           cache: npm
