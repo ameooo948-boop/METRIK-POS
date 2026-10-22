@@ -26,21 +26,22 @@ use App\Http\Controllers\Purchasing\PurchaseReturnController;
 use App\Http\Controllers\Suppliers\SupplierController;
 use App\Http\Middleware\ResolveOrganizationContext;
 use App\Http\Middleware\RequestLogContext;
+use App\Http\Middleware\SecurityHeaders;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
 Route::get('/', function () {
     return Inertia::render('Welcome', ['appName' => 'Metrik POS']);
-})->name('home');
+})->middleware(SecurityHeaders::class)->name('home');
 
-Route::middleware('guest')->group(function () {
+Route::middleware(['guest', SecurityHeaders::class])->group(function () {
     Route::get('/login', [AuthenticatedSessionController::class, 'create'])->name('login');
     Route::post('/login', [AuthenticatedSessionController::class, 'store'])->name('login.store');
     Route::get('/register', fn () => Inertia::render('Auth/Register'))->name('register');
     Route::post('/register', [RegisteredUserController::class, 'store'])->middleware('throttle:6,1')->name('register.store');
 });
 
-Route::middleware('auth')->group(function () {
+Route::middleware(['auth', SecurityHeaders::class])->group(function () {
     Route::get('/setup/organization', [OrganizationSetupController::class, 'create'])->name('organization.setup');
     Route::post('/setup/organization', [OrganizationSetupController::class, 'store'])->middleware('throttle:6,1')->name('organization.setup.store');
     Route::post('/organizations/{organization}/switch', SwitchOrganizationController::class)->name('organizations.switch');
