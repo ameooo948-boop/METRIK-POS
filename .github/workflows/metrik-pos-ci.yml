@@ -1,0 +1,83 @@
+name: Metrik POS CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: metrik-pos-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate Laravel and Vue application
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      APP_ENV: testing
+      APP_DEBUG: "false"
+      APP_URL: http://localhost
+      DB_CONNECTION: sqlite
+      DB_DATABASE: database/ci.sqlite
+      CACHE_STORE: file
+      SESSION_DRIVER: file
+      QUEUE_CONNECTION: database
+      MAIL_MAILER: log
+      FILESYSTEM_DISK: local
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: curl, dom, fileinfo, mbstring, openssl, pdo_sqlite, sqlite3, tokenizer, xml
+          coverage: none
+          tools: composer:v2
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Validate Composer metadata
+        run: composer validate --no-check-publish
+
+      - name: Install PHP dependencies
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Prepare isolated CI environment
+        shell: bash
+        run: |
+          test -f .env.example || { echo 'Missing .env.example'; exit 1; }
+          cp .env.example .env
+          mkdir -p database
+          touch database/ci.sqlite
+          php artisan key:generate --force
+
+      - name: Check production PHP platform requirements
+        run: composer check-platform-reqs --no-dev
+
+      - name: Install JavaScript dependencies
+        run: npm ci
+
+      - name: Build frontend assets
+        run: npm run build
+
+      - name: Run Laravel migrations
+        run: php artisan migrate --force
+
+      - name: Run automated test suite
+        run: php artisan test
+
+      - name: Run strict application health check
+        run: php artisan metrik:health-check --strict
