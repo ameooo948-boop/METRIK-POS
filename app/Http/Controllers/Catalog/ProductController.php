@@ -5,15 +5,18 @@ namespace App\Http\Controllers\Catalog;
 use App\Data\Products\CreateProductData;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Catalog\StoreProductRequest;
+use App\Models\Branch;
 use App\Models\Category;
 use App\Models\Organization;
 use App\Models\Product;
 use App\Models\Unit;
 use App\Services\Catalog\CreateProduct;
+use App\Services\Catalog\ImportProductsCsv;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class ProductController extends Controller
 {
@@ -77,6 +80,7 @@ class ProductController extends Controller
             'canManageInventory' => $request->user()->can('manageInventory', $organization),
             'flashMessage' => $request->session()->get('success'),
             'errorMessage' => $request->session()->get('error'),
+            'importErrors' => $request->session()->get('importErrors', []),
         ]);
     }
 
@@ -100,5 +104,140 @@ class ProductController extends Controller
         $createProduct->handle($data);
 
         return redirect()->route('products.index')->with('success', 'تم حفظ المنتج وتسجيل رصيده الافتتاحي بنجاح.');
+    }
+
+    public function export(Request $request): StreamedResponse|RedirectResponse
+    {
+        /** @var Organization $organization */
+        $organization = $request->attributes->get('currentOrganization');
+        $this->authorize('manageCatalog', $organization);
+
+        $branch = $request->attributes->get('currentBranch');
+        if ($branch === null) {
+            return redirect()->route('branches.index')->with('error', 'لا يوجد فرع متاح لهذا الحساب.');
+        }
+
+        $headers = ImportProductsCsv::HEADERS;
+        $organizationId = (int) $organization->getKey();
+        $branchId = (int) $branch->getKey();
+
+        return response()->streamDownload(function () use ($organizationId, $branchId, $headers): void {
+            $output = fopen('php://output', 'wb');
+            if ($output === false) {
+                return;
+            }
+
+            fwrite($output, "\xEF\xBB\xBF");
+            fputcsv($output, $headers);
+
+            Product::query()
+                ->forOrganization($organizationId)
+                ->with([
+                    'category:id,name',
+                    'baseUnit:id,code',
+                    'barcodes:id,product_id,barcode,unit_id',
+                    'inventoryBalances' => fn ($query) => $query
+                        ->where('branch_id', $branchId)
+                        ->select(['id', 'organization_id', 'branch_id', 'product_id', 'quantity']),
+                ])
+                ->orderBy('id')
+                ->chunkById(500, function ($products) use ($output): void {
+                    foreach ($products as $product) {
+                        $row = [
+                            $product->sku,
+                            $product->name,
+                            $product->description,
+                            $product->category?->name,
+                            $product->baseUnit?->code,
+                            $product->barcodes->first()?->barcode,
+                            $product->purchase_price,
+                            $product->selling_price,
+                            $product->low_stock_threshold,
+                            $product->inventoryBalances->first()?->quantity ?? '0.000',
+                            $product->is_active ? '1' : '0',
+                        ];
+
+                        fputcsv($output, array_map(fn ($value): string => $this->safeCsvCell($value), $row));
+                    }
+                });
+
+            fclose($output);
+        }, 'metrik-products-'.now()->format('Ymd-His').'.csv', [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+            'Cache-Control' => 'private, no-store, max-age=0, must-revalidate',
+        ]);
+    }
+
+    public function template(Request $request): StreamedResponse
+    {
+        /** @var Organization $organization */
+        $organization = $request->attributes->get('currentOrganization');
+        $this->authorize('manageCatalog', $organization);
+
+        return response()->streamDownload(function (): void {
+            $output = fopen('php://output', 'wb');
+            if ($output === false) {
+                return;
+            }
+            fwrite($output, "\xEF\xBB\xBF");
+            fputcsv($output, ImportProductsCsv::HEADERS);
+            fclose($output);
+        }, 'metrik-products-template.csv', [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+            'Cache-Control' => 'private, no-store, max-age=0, must-revalidate',
+        ]);
+    }
+
+    public function import(Request $request, CreateProduct $createProduct, ImportProductsCsv $importer): RedirectResponse
+    {
+        /** @var Organization $organization */
+        $organization = $request->attributes->get('currentOrganization');
+        $this->authorize('manageCatalog', $organization);
+
+        /** @var Branch|null $branch */
+        $branch = $request->attributes->get('currentBranch');
+        if ($branch === null) {
+            return redirect()->route('branches.index')->with('error', 'لا يوجد فرع متاح لهذا الحساب.');
+        }
+
+        $validated = $request->validate([
+            'file' => ['required', 'file', 'mimes:csv,txt', 'max:10240'],
+        ], [
+            'file.required' => 'اختار ملف CSV للاستيراد.',
+            'file.file' => 'الملف المرفوع غير صالح.',
+            'file.mimes' => 'صيغة الملف لازم تكون CSV أو TXT.',
+            'file.max' => 'حجم الملف يجب ألا يتجاوز 10 ميجابايت.',
+        ]);
+
+        $result = $importer->handle(
+            $validated['file'],
+            $organization,
+            $branch,
+            (int) $request->user()->getKey(),
+            $createProduct,
+        );
+
+        $message = sprintf(
+            'انتهى الاستيراد: إنشاء %d، تحديث %d، وصفوف متجاوزة %d من أصل %d. الرصيد الافتتاحي يطبّق على المنتجات الجديدة فقط.',
+            $result['created'],
+            $result['updated'],
+            $result['failed'],
+            $result['processed'],
+        );
+
+        return redirect()->route('products.index')
+            ->with($result['failed'] > 0 ? 'error' : 'success', $message)
+            ->with('importErrors', $result['errors']);
+    }
+
+    private function safeCsvCell(mixed $value): string
+    {
+        $value = (string) ($value ?? '');
+
+        if (preg_match('/^[\x09\x0D=+@\-]/u', $value) === 1) {
+            return "'".$value;
+        }
+
+        return $value;
     }
 }

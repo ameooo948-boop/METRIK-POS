@@ -15,8 +15,17 @@ class Product extends Model
     use HasFactory, SoftDeletes;
 
     protected $fillable = [
-        'organization_id', 'category_id', 'base_unit_id', 'created_by', 'sku', 'name', 'description',
-        'purchase_price', 'selling_price', 'low_stock_threshold', 'is_active',
+        'organization_id',
+        'category_id',
+        'base_unit_id',
+        'created_by',
+        'sku',
+        'name',
+        'description',
+        'purchase_price',
+        'selling_price',
+        'low_stock_threshold',
+        'is_active',
     ];
 
     protected function casts(): array
@@ -31,12 +40,16 @@ class Product extends Model
 
     protected function sku(): Attribute
     {
-        return Attribute::make(set: static fn (string $value): string => mb_strtoupper(trim($value)));
+        return Attribute::make(
+            set: static fn (string $value): string => mb_strtoupper(trim($value)),
+        );
     }
 
     protected function name(): Attribute
     {
-        return Attribute::make(set: static fn (string $value): string => trim($value));
+        return Attribute::make(
+            set: static fn (string $value): string => trim($value),
+        );
     }
 
     public function organization(): BelongsTo
@@ -74,16 +87,6 @@ class Product extends Model
         return $this->hasMany(InventoryMovement::class);
     }
 
-    public function saleItems(): HasMany
-    {
-        return $this->hasMany(SaleItem::class);
-    }
-
-    public function purchaseInvoiceItems(): HasMany
-    {
-        return $this->hasMany(PurchaseInvoiceItem::class);
-    }
-
     public function scopeForOrganization(Builder $query, int $organizationId): Builder
     {
         return $query->where('organization_id', $organizationId);
@@ -97,14 +100,21 @@ class Product extends Model
     public function scopeSearch(Builder $query, ?string $search): Builder
     {
         $search = trim((string) $search);
+
         if ($search === '') {
             return $query;
         }
 
-        return $query->where(function (Builder $nested) use ($search): void {
-            $nested->where('name', 'like', '%'.$search.'%')
-                ->orWhere('sku', 'like', '%'.$search.'%')
-                ->orWhereHas('barcodes', fn (Builder $barcodes) => $barcodes->where('barcode', 'like', '%'.$search.'%'));
-        });
+        return $query
+            ->where(function (Builder $nested) use ($search): void {
+                $nested->where('name', 'like', '%'.$search.'%')
+                    ->orWhere('sku', 'like', '%'.$search.'%')
+                    ->orWhereHas('barcodes', fn (Builder $barcodes) => $barcodes->where('barcode', 'like', '%'.$search.'%'));
+            })
+            // Barcode scanners submit the entire value; put exact barcode hits first.
+            ->orderByRaw(
+                'CASE WHEN EXISTS (SELECT 1 FROM product_barcodes AS exact_barcodes WHERE exact_barcodes.product_id = products.id AND exact_barcodes.organization_id = products.organization_id AND exact_barcodes.barcode = ?) THEN 0 WHEN products.sku = ? THEN 1 ELSE 2 END',
+                [$search, $search],
+            );
     }
 }

@@ -66,6 +66,9 @@ Route::middleware(['auth', SecurityHeaders::class])->group(function () {
         Route::post('/branches', [BranchController::class, 'store'])->middleware('throttle:30,1')->name('branches.store');
         Route::post('/branches/{branch}/switch', [BranchController::class, 'switch'])->name('branches.switch');
 
+        Route::get('/products/export', [ProductController::class, 'export'])->name('products.export');
+        Route::get('/products/template', [ProductController::class, 'template'])->name('products.template');
+        Route::post('/products/import', [ProductController::class, 'import'])->middleware('throttle:10,1,products-import')->name('products.import');
         Route::get('/products', [ProductController::class, 'index'])->name('products.index');
         Route::post('/products', [ProductController::class, 'store'])->middleware('throttle:60,1')->name('products.store');
         Route::post('/categories', [CategoryController::class, 'store'])->middleware('throttle:30,1')->name('categories.store');

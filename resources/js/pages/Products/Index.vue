@@ -13,6 +13,7 @@ const props = defineProps({
     canManageInventory: { type: Boolean, required: true },
     flashMessage: { type: String, default: null },
     errorMessage: { type: String, default: null },
+    importErrors: { type: Array, default: () => [] },
 });
 
 const searchTerm = ref(props.filters.search ?? '');
@@ -33,6 +34,7 @@ const productForm = useForm({
 });
 
 const categoryForm = useForm({ name: '' });
+const importForm = useForm({ file: null });
 const adjustmentForm = useForm({
     product_id: null,
     type: 'stock_in',
@@ -55,6 +57,19 @@ function createProduct() {
             'name', 'sku', 'description', 'category_id', 'barcode',
             'purchase_price', 'selling_price', 'low_stock_threshold', 'initial_stock',
         ),
+    });
+}
+
+function selectImportFile(event) {
+    importForm.file = event.target.files?.[0] ?? null;
+    importForm.clearErrors('file');
+}
+
+function importProducts() {
+    importForm.post('/products/import', {
+        forceFormData: true,
+        preserveScroll: true,
+        onSuccess: () => importForm.reset('file'),
     });
 }
 
@@ -142,6 +157,35 @@ function formatMoney(value) {
 
             <div v-if="flashMessage" class="rounded-xl border border-emerald-300/20 bg-emerald-300/10 px-4 py-3 text-sm text-emerald-200" role="status">{{ flashMessage }}</div>
             <div v-if="errorMessage" class="rounded-xl border border-rose-300/20 bg-rose-300/10 px-4 py-3 text-sm text-rose-200" role="alert">{{ errorMessage }}</div>
+
+            <section v-if="canManageCatalog" class="rounded-2xl border border-white/10 bg-slate-900 p-5 sm:p-7">
+                <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                    <div class="max-w-2xl">
+                        <h2 class="text-xl font-bold">استيراد وتصدير المنتجات</h2>
+                        <p class="mt-2 text-sm leading-6 text-slate-400">استورد حتى 5000 صف من CSV، أو صدّر كتالوج المؤسسة. عند استيراد كود موجود يتم تحديث بيانات الكتالوج فقط؛ لا يتم تعديل المخزون الحالي. الرصيد الافتتاحي يُستخدم للمنتجات الجديدة فقط.</p>
+                        <p class="mt-2 text-xs leading-5 text-slate-500">استخدم ملف النموذج وعناوين الأعمدة الإنجليزية كما هي. حافظ على الباركود كـ Text في Excel حتى لا تُحذف الأصفار الموجودة في البداية.</p>
+                    </div>
+                    <div class="flex flex-wrap gap-2">
+                        <a href="/products/template" class="rounded-xl border border-white/10 px-4 py-2.5 text-sm font-semibold hover:border-emerald-300/60">تحميل نموذج CSV</a>
+                        <a href="/products/export" class="rounded-xl border border-emerald-300/30 px-4 py-2.5 text-sm font-semibold text-emerald-200 hover:border-emerald-300/60">تصدير الكتالوج CSV</a>
+                    </div>
+                </div>
+                <form class="mt-5 flex flex-col gap-3 rounded-xl border border-white/10 bg-slate-950/60 p-4 sm:flex-row sm:items-end" enctype="multipart/form-data" @submit.prevent="importProducts">
+                    <div class="min-w-0 flex-1">
+                        <label for="products-csv" class="mb-2 block text-sm font-semibold">ملف CSV</label>
+                        <input id="products-csv" type="file" accept=".csv,.txt,text/csv" required class="block w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2.5 text-sm file:ml-3 file:rounded-lg file:border-0 file:bg-white/10 file:px-3 file:py-2 file:text-slate-100" @change="selectImportFile">
+                        <p v-if="importForm.errors.file" class="mt-2 text-sm text-rose-300">{{ importForm.errors.file }}</p>
+                    </div>
+                    <button type="submit" :disabled="importForm.processing || !importForm.file" class="rounded-xl bg-emerald-300 px-5 py-3 font-bold text-slate-950 hover:bg-emerald-200 disabled:cursor-not-allowed disabled:opacity-50">{{ importForm.processing ? 'جارٍ الاستيراد...' : 'استيراد المنتجات' }}</button>
+                </form>
+                <div v-if="importErrors.length" class="mt-4 rounded-xl border border-amber-300/20 bg-amber-300/5 p-4" role="status">
+                    <h3 class="font-semibold text-amber-200">ملاحظات الصفوف المتجاوزة (أول {{ importErrors.length }} ملاحظة)</h3>
+                    <div class="mt-3 max-h-60 space-y-2 overflow-auto text-sm text-slate-300">
+                        <p v-for="issue in importErrors" :key="`${issue.row}-${issue.message}`"><span class="font-bold text-amber-200">صف {{ issue.row }}:</span> {{ issue.message }}</p>
+                    </div>
+                    <p class="mt-3 text-xs text-slate-500">تم الاحتفاظ بأول 50 ملاحظة فقط لعدم زيادة حجم الرسالة.</p>
+                </div>
+            </section>
 
             <section v-if="canManageCatalog" class="grid gap-5 xl:grid-cols-[minmax(0,1.6fr)_minmax(280px,0.7fr)]">
                 <div class="rounded-2xl border border-white/10 bg-slate-900 p-5 sm:p-7">
@@ -271,7 +315,7 @@ function formatMoney(value) {
                                     <span :class="Number(product.lowStockThreshold) > 0 && Number(product.quantity) <= Number(product.lowStockThreshold) ? 'text-amber-200' : 'text-emerald-200'">{{ formatQuantity(product.quantity) }}</span>
                                     <p class="mt-1 text-xs text-slate-500">حد التنبيه الفعلي للفرع: {{ formatQuantity(product.lowStockThreshold) }}</p>
                                 </td>
-                                <td class="px-5 py-4 text-slate-300" dir="ltr">{{ product.barcodes[0]?.barcode || '—' }}</td>
+                                <td class="px-5 py-4 text-slate-300" dir="ltr"><div class="flex flex-wrap gap-1"><span v-for="barcode in product.barcodes" :key="barcode.id" class="rounded bg-white/5 px-2 py-1 text-xs">{{ barcode.barcode }}</span><span v-if="!product.barcodes.length">—</span></div></td>
                                 <td class="px-5 py-4">
                                     <span :class="product.isActive ? 'text-emerald-200' : 'text-slate-500'">{{ product.isActive ? 'نشط' : 'متوقف' }}</span>
                                 </td>
