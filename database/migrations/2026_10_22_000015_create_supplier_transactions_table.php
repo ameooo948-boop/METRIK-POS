@@ -22,9 +22,19 @@ return new class extends Migration
             $table->nullableMorphs('reference');
             $table->timestamps();
 
-            $table->index(['organization_id', 'supplier_id', 'created_at']);
-            $table->index(['organization_id', 'branch_id', 'created_at']);
-            $table->index(['transaction_type', 'created_at']);
+            // Keep explicit index names under MySQL's 64-character identifier limit.
+            $table->index(
+                ['organization_id', 'supplier_id', 'created_at'],
+                'sup_tx_org_supplier_created_idx'
+            );
+            $table->index(
+                ['organization_id', 'branch_id', 'created_at'],
+                'sup_tx_org_branch_created_idx'
+            );
+            $table->index(
+                ['transaction_type', 'created_at'],
+                'sup_tx_type_created_idx'
+            );
         });
     }
 
