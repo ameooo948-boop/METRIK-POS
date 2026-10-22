@@ -29,6 +29,7 @@ use App\Http\Controllers\Purchasing\PurchaseInvoiceController;
 use App\Http\Controllers\Purchasing\SupplierPaymentController;
 use App\Http\Controllers\Purchasing\PurchaseReturnController;
 use App\Http\Controllers\Suppliers\SupplierController;
+use App\Http\Controllers\Suppliers\SupplierPerformanceController;
 use App\Http\Middleware\ResolveOrganizationContext;
 use App\Http\Middleware\RequestLogContext;
 use App\Http\Middleware\SecurityHeaders;
@@ -83,6 +84,8 @@ Route::middleware(['auth', SecurityHeaders::class])->group(function () {
         Route::get('/inventory/valuation', [InventoryValuationController::class, 'index'])->name('inventory.valuation.index');
         Route::patch('/inventory/low-stock/{productId}/threshold', [LowStockController::class, 'updateThreshold'])->whereNumber('productId')->middleware('throttle:60,1,inventory-reorder-threshold-update')->name('inventory.low-stock.threshold.update');
 
+        Route::get('/suppliers/performance/export', [SupplierPerformanceController::class, 'export'])->name('suppliers.performance.export');
+        Route::get('/suppliers/performance', [SupplierPerformanceController::class, 'index'])->name('suppliers.performance.index');
         Route::get('/suppliers', [SupplierController::class, 'index'])->name('suppliers.index');
         Route::post('/suppliers', [SupplierController::class, 'store'])->middleware('throttle:30,1')->name('suppliers.store');
         Route::get('/purchase-invoices', [PurchaseInvoiceController::class, 'index'])->name('purchase-invoices.index');
