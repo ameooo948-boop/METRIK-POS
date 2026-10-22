@@ -8,9 +8,11 @@ on:
 permissions:
   contents: read
 
+# Keep the running validation job alive when a newer push starts another run.
+# GitHub may replace a pending run, but it will not cancel the active run.
 concurrency:
   group: metrik-pos-ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   validate:

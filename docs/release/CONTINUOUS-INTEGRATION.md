@@ -1,6 +1,6 @@
 # Metrik POS continuous integration
 
-The workflow at `.github/workflows/metrik-pos-ci.yml` runs on pushes, pull requests, and manual dispatches. It checks Composer metadata and production PHP platform requirements, installs dependencies, builds the Vue/Vite assets, runs database migrations against a temporary SQLite file, executes the Laravel test suite, and runs the strict Metrik health check.
+The workflow at `.github/workflows/metrik-pos-ci.yml` runs on pushes, pull requests, and manual dispatches. The workflow uses concurrency without canceling an already running validation job when another push arrives. A newer pending run may replace an older pending run in the same concurrency group, but it does not interrupt the active run. It checks Composer metadata and production PHP platform requirements, installs dependencies, builds the Vue/Vite assets, runs database migrations against a temporary SQLite file, executes the Laravel test suite, and runs the strict Metrik health check.
 
 ## Environment isolation
 
