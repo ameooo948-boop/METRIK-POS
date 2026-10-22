@@ -29,6 +29,7 @@ use App\Http\Controllers\POS\SaleCheckoutController;
 use App\Http\Controllers\Sales\SaleController;
 use App\Http\Controllers\Sales\SaleReturnController;
 use App\Http\Controllers\Purchasing\PurchaseInvoiceController;
+use App\Http\Controllers\Purchasing\PurchaseOrderController;
 use App\Http\Controllers\Purchasing\SupplierPaymentController;
 use App\Http\Controllers\Purchasing\PurchaseReturnController;
 use App\Http\Controllers\Suppliers\SupplierController;
@@ -99,6 +100,10 @@ Route::middleware(['auth', SecurityHeaders::class])->group(function () {
         Route::get('/suppliers/performance', [SupplierPerformanceController::class, 'index'])->name('suppliers.performance.index');
         Route::get('/suppliers', [SupplierController::class, 'index'])->name('suppliers.index');
         Route::post('/suppliers', [SupplierController::class, 'store'])->middleware('throttle:30,1')->name('suppliers.store');
+        Route::get('/purchase-orders', [PurchaseOrderController::class, 'index'])->name('purchase-orders.index');
+        Route::post('/purchase-orders', [PurchaseOrderController::class, 'store'])->middleware('throttle:30,1')->name('purchase-orders.store');
+        Route::post('/purchase-orders/{purchaseOrder}/receive', [PurchaseOrderController::class, 'receive'])->whereNumber('purchaseOrder')->middleware('throttle:30,1')->name('purchase-orders.receive');
+        Route::post('/purchase-orders/{purchaseOrder}/cancel', [PurchaseOrderController::class, 'cancel'])->whereNumber('purchaseOrder')->middleware('throttle:30,1')->name('purchase-orders.cancel');
         Route::get('/purchase-invoices', [PurchaseInvoiceController::class, 'index'])->name('purchase-invoices.index');
         Route::post('/purchase-invoices', [PurchaseInvoiceController::class, 'store'])->middleware('throttle:30,1')->name('purchase-invoices.store');
         Route::get('/supplier-payments', [SupplierPaymentController::class, 'index'])->name('supplier-payments.index');
