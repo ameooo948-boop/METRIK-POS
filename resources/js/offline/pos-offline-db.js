@@ -187,12 +187,17 @@ export async function updateOutboxEntry(uuid, changes) {
 }
 
 export function applyUnsettledOfflineSales(products, outbox) {
+    const productById = new Map(products.map((product) => [Number(product.id), product]));
     const quantities = new Map();
     for (const entry of outbox) {
         if (!['pending', 'syncing', 'needs_review'].includes(entry.status)) continue;
         for (const item of entry.items || []) {
             const productId = Number(item.product_id);
-            quantities.set(productId, (quantities.get(productId) || 0) + Number(item.quantity || 0));
+            const product = productById.get(productId);
+            const unit = (product?.units || []).find((candidate) => Number(candidate.id) === Number(item.unit_id ?? product?.baseUnitId));
+            const factor = Number(unit?.factorToBase || 1);
+            const baseQuantity = Math.round(Number(item.quantity || 0) * factor * 1000) / 1000;
+            quantities.set(productId, (quantities.get(productId) || 0) + baseQuantity);
         }
     }
 
@@ -262,6 +267,7 @@ export async function syncPendingOfflineSales(context, axios) {
                 offline_created_at: entry.offline_created_at,
                 items: entry.items.map((item) => ({
                     product_id: Number(item.product_id),
+                    unit_id: item.unit_id === null || item.unit_id === undefined || item.unit_id === '' ? null : Number(item.unit_id),
                     quantity: String(item.quantity),
                     price_snapshot: String(item.price_snapshot),
                 })),

@@ -57,7 +57,8 @@ class StorePurchaseInvoiceRequest extends FormRequest
             'paid_amount' => ['required', 'numeric', 'min:0', 'max:999999999999.99', 'decimal:0,2'],
             'notes' => ['nullable', 'string', 'max:3000'],
             'items' => ['required', 'array', 'min:1', 'max:100'],
-            'items.*' => ['required', 'array:product_id,quantity,unit_cost'],
+            'items.*' => ['required', 'array:product_id,quantity,unit_cost,unit_id'],
+            'items.*.unit_id' => ['nullable', 'integer', Rule::exists('units', 'id')],
             'items.*.product_id' => [
                 'required', 'integer', 'distinct',
                 Rule::exists('products', 'id')->where(
@@ -79,7 +80,8 @@ class StorePurchaseInvoiceRequest extends FormRequest
             'items' => 'أصناف الفاتورة',
             'items.*.product_id' => 'المنتج',
             'items.*.quantity' => 'الكمية',
-            'items.*.unit_cost' => 'سعر شراء الوحدة الأساسية',
+            'items.*.unit_cost' => 'سعر شراء الوحدة المختارة',
+            'items.*.unit_id' => 'وحدة القياس',
         ];
     }
 }

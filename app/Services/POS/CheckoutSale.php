@@ -17,6 +17,7 @@ use App\Models\SaleItem;
 use App\Models\SalePayment;
 use App\Support\DecimalMoney;
 use App\Support\DecimalQuantity;
+use App\Support\ProductUnitOptions;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
@@ -114,7 +115,7 @@ class CheckoutSale
                     ->active()
                     ->whereIn('id', $productIds)
                     ->orderBy('id')
-                    ->with('baseUnit:id,name_ar,name_en')
+                    ->with(['baseUnit:id,name_ar,name_en', 'unitConversions.unit:id,name_ar,name_en'])
                     ->lockForUpdate()
                     ->get()
                     ->keyBy(static fn (Product $product): int => (int) $product->getKey());
@@ -140,8 +141,21 @@ class CheckoutSale
                     /** @var Product $product */
                     $product = $products->get((int) $item['product_id']);
                     $quantityMilli = DecimalQuantity::toMilli((string) $item['quantity']);
-                    $unitPriceCents = DecimalMoney::toCents((string) $product->selling_price);
-                    $unitCostCents = DecimalMoney::toCents((string) $product->purchase_price);
+                    $requestedUnitId = isset($item['unit_id']) && $item['unit_id'] !== '' ? (int) $item['unit_id'] : null;
+                    $unit = ProductUnitOptions::resolve($product, $requestedUnitId);
+                    if ($unit === null) {
+                        throw ValidationException::withMessages([
+                            'items.'.$index.'.unit_id' => 'وحدة القياس المختارة غير مفعلة لهذا المنتج. حدّث المنتج وحاول مرة أخرى.',
+                        ]);
+                    }
+                    $baseQuantityMilli = intdiv(($quantityMilli * $unit['factorMilli']) + 500, 1000);
+                    if ($baseQuantityMilli <= 0) {
+                        throw ValidationException::withMessages([
+                            'items.'.$index.'.quantity' => 'الكمية بعد تحويل وحدة القياس صغيرة جدًا أو غير صالحة.',
+                        ]);
+                    }
+                    $unitPriceCents = DecimalMoney::toCents($unit['sellingPrice']);
+                    $unitCostCents = DecimalMoney::toCents($unit['purchasePrice']);
 
                     if (array_key_exists('price_snapshot', $item)
                         && DecimalMoney::toCents((string) $item['price_snapshot']) !== $unitPriceCents) {
@@ -165,7 +179,7 @@ class CheckoutSale
                         ->first();
 
                     $currentMilli = $balance ? DecimalQuantity::toMilli((string) $balance->quantity) : 0;
-                    if ($quantityMilli > $currentMilli) {
+                    if ($baseQuantityMilli > $currentMilli) {
                         throw ValidationException::withMessages([
                             'items.'.$index.'.quantity' => 'الكمية المطلوبة من «'.$product->name.'» أكبر من رصيد الفرع الحالي ('.DecimalQuantity::fromMilli($currentMilli).').',
                         ]);
@@ -197,13 +211,13 @@ class CheckoutSale
                     foreach ($validLots as $lot) {
                         $validTrackedMilli += DecimalQuantity::toMilli((string) $lot->quantity_remaining);
                     }
-                    if ($quantityMilli > ($untrackedMilli + $validTrackedMilli)) {
+                    if ($baseQuantityMilli > ($untrackedMilli + $validTrackedMilli)) {
                         throw ValidationException::withMessages([
                             'items.'.$index.'.quantity' => 'الكمية المتاحة للبيع من «'.$product->name.'» غير كافية بعد استبعاد التشغيلات منتهية الصلاحية. راجع تواريخ الصلاحية والمخزون.',
                         ]);
                     }
 
-                    $remainingToAllocate = min($quantityMilli, $validTrackedMilli);
+                    $remainingToAllocate = min($baseQuantityMilli, $validTrackedMilli);
                     $lotAllocations = [];
                     foreach ($validLots as $lot) {
                         if ($remainingToAllocate <= 0) {
@@ -217,12 +231,14 @@ class CheckoutSale
                         }
                     }
 
-                    $newMilli = $currentMilli - $quantityMilli;
+                    $newMilli = $currentMilli - $baseQuantityMilli;
                     $balances[(int) $product->getKey()] = ['model' => $balance, 'new_milli' => $newMilli];
                     $subtotalCents += $lineTotalCents;
                     $preparedItems[] = [
                         'product' => $product,
                         'quantity_milli' => $quantityMilli,
+                        'base_quantity_milli' => $baseQuantityMilli,
+                        'unit' => $unit,
                         'unit_price_cents' => $unitPriceCents,
                         'unit_cost_cents' => $unitCostCents,
                         'line_total_cents' => $lineTotalCents,
@@ -280,10 +296,13 @@ class CheckoutSale
                         'organization_id' => $data->organizationId,
                         'sale_id' => $sale->getKey(),
                         'product_id' => $product->getKey(),
+                        'unit_id' => $item['unit']['persistedId'],
                         'product_sku_snapshot' => $product->sku,
                         'product_name_snapshot' => $product->name,
-                        'unit_name_snapshot' => $product->baseUnit?->name_ar ?? $product->baseUnit?->name_en ?? 'وحدة أساسية',
+                        'unit_name_snapshot' => $item['unit']['unitName'],
+                        'unit_conversion_factor_snapshot' => $item['unit']['factorToBase'],
                         'quantity' => $quantity,
+                        'quantity_in_base' => DecimalQuantity::fromMilli($item['base_quantity_milli']),
                         'unit_price' => $unitPrice,
                         'unit_cost_snapshot' => $unitCost,
                         'discount_amount' => '0.00',
@@ -323,7 +342,7 @@ class CheckoutSale
                         'product_id' => $product->getKey(),
                         'created_by' => $data->cashierId,
                         'movement_type' => 'sale',
-                        'quantity_delta' => DecimalQuantity::fromMilli(-$item['quantity_milli']),
+                        'quantity_delta' => DecimalQuantity::fromMilli(-$item['base_quantity_milli']),
                         'balance_after' => DecimalQuantity::fromMilli($newMilli),
                         'source' => 'pos',
                         'reason' => 'بيع نقطة البيع '.$sale->invoice_number,
@@ -413,13 +432,19 @@ class CheckoutSale
 
         $requestedItems = [];
         foreach ($data->items as $item) {
-            $requestedItems[(int) $item['product_id']] = DecimalQuantity::toMilli((string) $item['quantity']);
+            $requestedItems[(int) $item['product_id']] = [
+                'quantity_milli' => DecimalQuantity::toMilli((string) $item['quantity']),
+                'unit_id' => isset($item['unit_id']) && $item['unit_id'] !== '' ? (int) $item['unit_id'] : null,
+            ];
         }
         ksort($requestedItems, SORT_NUMERIC);
 
         $savedItems = [];
         foreach ($existing->items as $item) {
-            $savedItems[(int) $item->product_id] = DecimalQuantity::toMilli((string) $item->quantity);
+            $savedItems[(int) $item->product_id] = [
+                'quantity_milli' => DecimalQuantity::toMilli((string) $item->quantity),
+                'unit_id' => $item->unit_id === null ? null : (int) $item->unit_id,
+            ];
         }
         ksort($savedItems, SORT_NUMERIC);
 

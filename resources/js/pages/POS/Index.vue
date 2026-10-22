@@ -75,13 +75,85 @@ function createOperationUuid() {
     });
 }
 
+function unitOptionsFor(product) {
+    if (Array.isArray(product?.units) && product.units.length) return product.units;
+    return [{
+        id: Number(product?.baseUnitId || 0),
+        unitName: product?.unitName || 'وحدة أساسية',
+        factorToBase: '1.000',
+        sellingPrice: product?.sellingPrice ?? '0.00',
+        purchasePrice: '0.00',
+        isBase: true,
+    }];
+}
+function lineUnit(line) {
+    const options = unitOptionsFor(line.product);
+    return options.find((unit) => Number(unit.id) === Number(line.unitId ?? line.product.baseUnitId)) || options[0];
+}
+function lineBaseQuantity(line) {
+    return Math.round((Number(line.quantity || 0) * Number(lineUnit(line).factorToBase || 1)) * 1000) / 1000;
+}
+function itemUnitId(line) {
+    const unit = lineUnit(line);
+    return unit?.isBase || Number(unit?.id) === Number(line.product.baseUnitId) ? null : Number(unit.id);
+}
+function getMatchedUnitId(product) {
+    const term = searchQuery.value.trim();
+    const match = (product.barcodeUnits || []).find((barcode) => String(barcode.barcode) === term);
+    return match ? Number(match.unitId) : Number(product.selectedUnitId ?? product.baseUnitId ?? 0);
+}
+function selectedUnitForProduct(product) {
+    const options = unitOptionsFor(product);
+    return options.find((unit) => Number(unit.id) === getMatchedUnitId(product)) || options[0];
+}
+function changeCartUnit(line, nextUnitId) {
+    const oldUnit = lineUnit(line);
+    const options = unitOptionsFor(line.product);
+    const nextUnit = options.find((unit) => Number(unit.id) === Number(nextUnitId));
+    if (!nextUnit) return;
+    const oldBase = Number(line.quantity) * Number(oldUnit.factorToBase || 1);
+    const converted = oldBase / Number(nextUnit.factorToBase || 1);
+    const rounded = Math.round(converted * 1000) / 1000;
+    if (Math.abs(rounded * Number(nextUnit.factorToBase || 1) - oldBase) > 0.0011) {
+        offlineStatusMessage.value = 'لا يمكن تمثيل الكمية الحالية بدقة بهذه الوحدة. غيّر الكمية يدويًا بعد اختيار الوحدة.';
+        return;
+    }
+    line.unitId = Number(nextUnit.id);
+    line.quantity = rounded.toFixed(3);
+}
+function addToCart(product, requestedUnitId = null) {
+    if (!props.shift || Number(product.stock) <= 0) return;
+    const options = unitOptionsFor(product);
+    const targetUnit = options.find((unit) => Number(unit.id) === Number(requestedUnitId ?? product.baseUnitId)) || options[0];
+    const existing = cart.value.find((line) => Number(line.product.id) === Number(product.id));
+    let nextQuantity = 1;
+    if (existing) {
+        const previousUnit = lineUnit(existing);
+        if (Number(previousUnit.id) === Number(targetUnit.id)) {
+            nextQuantity = Number(existing.quantity) + 1;
+        } else {
+            const existingBase = Number(existing.quantity) * Number(previousUnit.factorToBase || 1);
+            nextQuantity = existingBase / Number(targetUnit.factorToBase || 1) + 1;
+        }
+    }
+    nextQuantity = Math.round(nextQuantity * 1000) / 1000;
+    if (nextQuantity * Number(targetUnit.factorToBase || 1) > Number(product.stock) + 0.0001) {
+        offlineStatusMessage.value = 'الكمية المتاحة من المنتج لا تكفي بهذه الوحدة. راجع رصيد الوحدة الأساسية.';
+        return;
+    }
+    if (existing) {
+        existing.unitId = Number(targetUnit.id);
+        existing.quantity = nextQuantity.toFixed(3);
+    } else {
+        cart.value.push({ product, quantity: '1.000', unitId: Number(targetUnit.id) });
+    }
+}
 const totalCents = computed(() => cart.value.reduce((sum, line) => {
     const quantityMilli = Math.round(Number(line.quantity) * 1000);
-    const priceCents = Math.round(Number(line.product.sellingPrice) * 100);
+    const priceCents = Math.round(Number(lineUnit(line).sellingPrice) * 100);
     return sum + Math.floor((quantityMilli * priceCents + 500) / 1000);
 }, 0));
 const estimatedTotal = computed(() => (totalCents.value / 100).toFixed(2));
-const totalQuantity = computed(() => cart.value.reduce((sum, item) => sum + Number(item.quantity || 0), 0));
 
 function filterCachedProducts() {
     const term = searchQuery.value.trim().toLocaleLowerCase('ar');
@@ -121,7 +193,7 @@ async function restoreCartFromLocal() {
     isRestoringCart.value = true;
     cart.value = saved.map((line) => {
         const product = byId.get(Number(line.productId));
-        return product ? { product, quantity: String(line.quantity) } : null;
+        return product ? { product, quantity: String(line.quantity), unitId: Number(line.unitId ?? product.baseUnitId) } : null;
     }).filter(Boolean);
     await nextTick();
     isRestoringCart.value = false;
@@ -193,18 +265,6 @@ async function findCustomers() {
     }
 }
 
-function addToCart(product) {
-    if (!props.shift || Number(product.stock) <= 0) return;
-    const existing = cart.value.find((line) => Number(line.product.id) === Number(product.id));
-    const nextQuantity = (existing ? Number(existing.quantity) : 0) + 1;
-    if (nextQuantity > Number(product.stock)) {
-        offlineStatusMessage.value = 'الكمية المتاحة محليًا لا تكفي. حدّث المخزون عند الاتصال قبل متابعة البيع.';
-        return;
-    }
-    if (existing) existing.quantity = nextQuantity.toFixed(3);
-    else cart.value.push({ product, quantity: '1.000' });
-}
-
 function removeFromCart(productId) {
     cart.value = cart.value.filter((line) => Number(line.product.id) !== Number(productId));
 }
@@ -258,7 +318,7 @@ async function queueOfflineCheckout() {
     const cachedById = new Map(cachedCatalog.value.map((product) => [Number(product.id), product]));
     for (const line of cart.value) {
         const latest = cachedById.get(Number(line.product.id));
-        if (!latest || Number(line.quantity) > Number(latest.stock)) {
+        if (!latest || lineBaseQuantity({ ...line, product: latest }) > Number(latest.stock)) {
             offlineStatusMessage.value = `الرصيد المحلي لمنتج «${line.product.name}» لا يكفي بعد احتساب المبيعات غير المتزامنة.`;
             return;
         }
@@ -268,8 +328,9 @@ async function queueOfflineCheckout() {
     const uuid = checkoutForm.client_operation_uuid;
     const items = cart.value.map((line) => ({
         product_id: Number(line.product.id),
+        unit_id: itemUnitId(line),
         quantity: String(line.quantity),
-        price_snapshot: Number(line.product.sellingPrice).toFixed(2),
+        price_snapshot: Number(lineUnit(line).sellingPrice).toFixed(2),
     }));
     const estimatedTotal = items.reduce((sum, item) => sum + Math.round(Number(item.quantity) * Number(item.price_snapshot) * 100) / 100, 0);
 
@@ -323,6 +384,7 @@ async function checkout() {
 
     checkoutForm.items = cart.value.map((line) => ({
         product_id: Number(line.product.id),
+        unit_id: itemUnitId(line),
         quantity: String(line.quantity),
     }));
     checkoutForm.post('/pos/checkout', {
@@ -360,7 +422,8 @@ async function retryReviewedSale(entry) {
             offlineStatusMessage.value = 'يوجد منتج لم يعد موجودًا في الكتالوج النشط. لا يمكن إعادة المحاولة تلقائيًا.';
             return;
         }
-        const price = Number(product.sellingPrice).toFixed(2);
+        const unit = (product.units || []).find((option) => Number(option.id) === Number(item.unit_id ?? product.baseUnitId)) || (product.units || [])[0];
+        const price = Number(unit?.sellingPrice ?? product.sellingPrice).toFixed(2);
         newTotal += Math.round(Number(item.quantity) * Number(price) * 100) / 100;
         revisedItems.push({ ...item, price_snapshot: price });
     }
@@ -436,6 +499,7 @@ watch(cart, (value) => {
     saveOfflineCart(offlineContext.value.saleScopeKey, value.map((line) => ({
         productId: Number(line.product.id),
         quantity: String(line.quantity),
+        unitId: Number(line.unitId ?? line.product.baseUnitId),
     }))).catch((error) => {
         offlineStatusMessage.value = error?.message || 'تعذر حفظ السلة على الجهاز.';
     });
@@ -547,19 +611,19 @@ onBeforeUnmount(() => {
                     <div v-if="!products.length" class="rounded-xl border border-dashed border-white/10 p-8 text-center text-slate-400">لا توجد منتجات مطابقة.</div>
                     <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                         <article v-for="product in products" :key="product.id" class="flex min-h-44 flex-col rounded-xl border border-white/10 bg-slate-950/70 p-4">
-                            <div class="flex items-start justify-between gap-3"><div class="min-w-0"><h3 class="break-words font-bold">{{ product.name }}</h3><p class="mt-1 text-xs text-slate-500">{{ product.sku }} · {{ product.unitName }}</p></div><span class="rounded-lg bg-white/5 px-2 py-1 text-xs text-slate-300">{{ quantity(product.stock) }}</span></div>
-                            <div class="mt-auto pt-5"><p class="text-lg font-black text-emerald-200">{{ money(product.sellingPrice) }} <span class="text-xs font-medium">ج.م</span></p><button type="button" :disabled="!shift || Number(product.stock) <= 0" @click="addToCart(product)" class="mt-3 w-full rounded-lg bg-emerald-300 px-3 py-2.5 text-sm font-bold text-slate-950 disabled:cursor-not-allowed disabled:opacity-40">{{ Number(product.stock) <= 0 ? 'نفد المخزون' : 'إضافة للسلة' }}</button></div>
+                            <div class="flex items-start justify-between gap-3"><div class="min-w-0"><h3 class="break-words font-bold">{{ product.name }}</h3><p class="mt-1 text-xs text-slate-500">{{ product.sku }} · الرصيد بوحدة {{ product.unitName }}</p></div><span class="rounded-lg bg-white/5 px-2 py-1 text-xs text-slate-300">{{ quantity(product.stock) }}</span></div>
+                            <div class="mt-auto pt-5"><p class="text-lg font-black text-emerald-200">{{ money(selectedUnitForProduct(product)?.sellingPrice ?? product.sellingPrice) }} <span class="text-xs font-medium">ج.م / {{ selectedUnitForProduct(product)?.unitName || product.unitName }}</span></p><button type="button" :disabled="!shift || Number(product.stock) <= 0" @click="addToCart(product, getMatchedUnitId(product))" class="mt-3 w-full rounded-lg bg-emerald-300 px-3 py-2.5 text-sm font-bold text-slate-950 disabled:cursor-not-allowed disabled:opacity-40">{{ Number(product.stock) <= 0 ? 'نفد المخزون' : 'إضافة للسلة' }}</button></div>
                         </article>
                     </div>
                 </section>
 
                 <section class="space-y-5 rounded-2xl border border-white/10 bg-slate-900 p-4 sm:p-6">
-                    <div class="flex items-center justify-between gap-3"><div><h2 class="text-xl font-bold">سلة البيع</h2><p class="mt-1 text-sm text-slate-400">{{ cart.length }} صنف · {{ quantity(totalQuantity) }} وحدة</p></div><button type="button" :disabled="!cart.length || checkoutForm.processing" @click="clearCart" class="rounded-lg border border-white/10 px-3 py-2 text-sm text-slate-300 disabled:opacity-40">تفريغ السلة</button></div>
+                    <div class="flex items-center justify-between gap-3"><div><h2 class="text-xl font-bold">سلة البيع</h2><p class="mt-1 text-sm text-slate-400">{{ cart.length }} صنف</p></div><button type="button" :disabled="!cart.length || checkoutForm.processing" @click="clearCart" class="rounded-lg border border-white/10 px-3 py-2 text-sm text-slate-300 disabled:opacity-40">تفريغ السلة</button></div>
                     <div v-if="!cart.length" class="rounded-xl border border-dashed border-white/10 p-8 text-center"><p class="font-semibold">السلة فارغة</p><p class="mt-2 text-sm text-slate-500">أضف منتجًا من القائمة لتبدأ البيع.</p></div>
                     <div v-else class="space-y-3">
                         <article v-for="line in cart" :key="line.product.id" class="rounded-xl border border-white/10 bg-slate-950/70 p-4">
-                            <div class="flex items-start justify-between gap-3"><div class="min-w-0"><h3 class="font-semibold">{{ line.product.name }}</h3><p class="mt-1 text-sm text-slate-400">{{ money(line.product.sellingPrice) }} ج.م / {{ line.product.unitName }}</p></div><button type="button" @click="removeFromCart(line.product.id)" class="text-sm text-rose-300 hover:text-rose-200">حذف</button></div>
-                            <div class="mt-3 flex items-end justify-between gap-3"><div><label :for="`quantity-${line.product.id}`" class="mb-1 block text-xs text-slate-400">الكمية</label><input :id="`quantity-${line.product.id}`" v-model="line.quantity" type="number" min="0.001" max="10000" step="0.001" @change="normalizeQuantity(line)" class="w-32 rounded-lg border border-white/10 bg-slate-900 px-3 py-2 outline-none focus:border-emerald-300" /></div><strong class="text-lg">{{ money(Number(line.product.sellingPrice) * Number(line.quantity)) }} ج.م</strong></div>
+                            <div class="flex items-start justify-between gap-3"><div class="min-w-0"><h3 class="font-semibold">{{ line.product.name }}</h3><p class="mt-1 text-sm text-slate-400">{{ money(lineUnit(line).sellingPrice) }} ج.م / {{ lineUnit(line).unitName }} · يعادل {{ quantity(lineBaseQuantity(line)) }} {{ line.product.unitName }}</p></div><button type="button" @click="removeFromCart(line.product.id)" class="text-sm text-rose-300 hover:text-rose-200">حذف</button></div>
+                            <div class="mt-3 grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(140px,0.8fr)]"><div><label :for="`unit-${line.product.id}`" class="mb-1 block text-xs text-slate-400">وحدة البيع</label><select :id="`unit-${line.product.id}`" :value="line.unitId" @change="changeCartUnit(line, $event.target.value)" class="w-full rounded-lg border border-white/10 bg-slate-900 px-3 py-2 outline-none focus:border-emerald-300"><option v-for="unit in unitOptionsFor(line.product)" :key="unit.id" :value="unit.id">{{ unit.unitName }} — {{ money(unit.sellingPrice) }} ج.م</option></select></div><div><label :for="`quantity-${line.product.id}`" class="mb-1 block text-xs text-slate-400">الكمية</label><input :id="`quantity-${line.product.id}`" v-model="line.quantity" type="number" min="0.001" max="10000" step="0.001" @change="normalizeQuantity(line)" class="w-32 rounded-lg border border-white/10 bg-slate-900 px-3 py-2 outline-none focus:border-emerald-300" /></div><strong class="flex items-end text-lg">{{ money(Number(lineUnit(line).sellingPrice) * Number(line.quantity)) }} ج.م</strong></div>
                         </article>
                     </div>
                     <p v-if="checkoutForm.errors.items" class="text-sm text-rose-300" role="alert">{{ checkoutForm.errors.items }}</p>

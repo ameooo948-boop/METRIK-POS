@@ -320,8 +320,7 @@ function formatMoney(value) {
                                     <span :class="product.isActive ? 'text-emerald-200' : 'text-slate-500'">{{ product.isActive ? 'نشط' : 'متوقف' }}</span>
                                 </td>
                                 <td class="px-5 py-4">
-                                    <button v-if="canManageInventory && product.isActive" type="button" @click="startAdjustment(product)" class="whitespace-nowrap rounded-lg border border-white/10 px-3 py-2 font-semibold hover:border-emerald-300/60">تسوية المخزون</button>
-                                    <span v-else class="text-xs text-slate-500">—</span>
+                                    <div class="flex flex-col items-start gap-2"><Link v-if="canManageCatalog" :href="`/products/${product.id}/units`" class="whitespace-nowrap rounded-lg border border-emerald-300/30 px-3 py-2 font-semibold text-emerald-200 hover:bg-emerald-300/10">الوحدات والباركود</Link><button v-if="canManageInventory && product.isActive" type="button" @click="startAdjustment(product)" class="whitespace-nowrap rounded-lg border border-white/10 px-3 py-2 font-semibold hover:border-emerald-300/60">تسوية المخزون</button><span v-if="!canManageCatalog && !canManageInventory" class="text-xs text-slate-500">—</span></div>
                                 </td>
                             </tr>
                         </tbody>

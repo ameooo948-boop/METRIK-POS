@@ -135,10 +135,13 @@ class CreateSaleReturn
                     $unitCostCents = DecimalMoney::toCents((string) $saleItem->unit_cost_snapshot);
                     $costCents = intdiv(($unitCostCents * $requestedMilli) + 500, 1000);
                     $restock = (bool) $requestedItem['restock'];
+                    $factorMilli = DecimalQuantity::toMilli((string) ($saleItem->unit_conversion_factor_snapshot ?? '1.000'));
+                    $baseQuantityMilli = intdiv(($requestedMilli * $factorMilli) + 500, 1000);
 
                     $preparedItems[] = [
                         'sale_item' => $saleItem,
                         'quantity_milli' => $requestedMilli,
+                        'base_quantity_milli' => $baseQuantityMilli,
                         'line_refund_cents' => $lineRefundCents,
                         'cost_cents' => $costCents,
                         'restock' => $restock,
@@ -202,7 +205,8 @@ class CreateSaleReturn
                         ]);
                     }
 
-                    $newBalanceMilli = DecimalQuantity::toMilli((string) $balance->quantity) + $prepared['quantity_milli'];
+                    $baseQuantityMilli = $prepared['base_quantity_milli'];
+                    $newBalanceMilli = DecimalQuantity::toMilli((string) $balance->quantity) + $baseQuantityMilli;
                     $balance->quantity = DecimalQuantity::fromMilli($newBalanceMilli);
                     $balance->save();
 
@@ -212,7 +216,7 @@ class CreateSaleReturn
                         'product_id' => $saleItem->product_id,
                         'created_by' => $data->cashierId,
                         'movement_type' => 'sale_return',
-                        'quantity_delta' => $quantity,
+                        'quantity_delta' => DecimalQuantity::fromMilli($baseQuantityMilli),
                         'balance_after' => DecimalQuantity::fromMilli($newBalanceMilli),
                         'source' => 'sale_return',
                         'reason' => 'إعادة مخزون من المرتجع '.$return->return_number,

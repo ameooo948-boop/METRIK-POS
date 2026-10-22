@@ -4,7 +4,7 @@ namespace App\Data\POS;
 
 final readonly class CreateSaleData
 {
-    /** @param list<array{product_id:int,quantity:string,price_snapshot?:string}> $items */
+    /** @param list<array{product_id:int,quantity:string,unit_id?:?int,price_snapshot?:string}> $items */
     public function __construct(
         public int $organizationId,
         public int $branchId,
@@ -38,6 +38,7 @@ final readonly class CreateSaleData
                 $normalised = [
                     'product_id' => (int) $item['product_id'],
                     'quantity' => (string) $item['quantity'],
+                    'unit_id' => isset($item['unit_id']) && $item['unit_id'] !== '' ? (int) $item['unit_id'] : null,
                 ];
 
                 if (array_key_exists('price_snapshot', $item)) {

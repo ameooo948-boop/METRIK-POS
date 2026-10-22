@@ -9,10 +9,12 @@ use App\Models\InventoryMovement;
 use App\Models\Product;
 use App\Models\PurchaseInvoice;
 use App\Models\PurchaseInvoiceItem;
+use App\Models\ProductUnitConversion;
 use App\Models\Supplier;
 use App\Models\SupplierTransaction;
 use App\Support\DecimalMoney;
 use App\Support\DecimalQuantity;
+use App\Support\ProductUnitOptions;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -50,7 +52,7 @@ class CreatePurchaseInvoice
                 ->active()
                 ->whereIn('id', $productIds)
                 ->orderBy('id')
-                ->with('baseUnit:id,name_ar')
+                ->with(['baseUnit:id,name_ar,name_en', 'unitConversions.unit:id,name_ar,name_en'])
                 ->lockForUpdate()
                 ->get()
                 ->keyBy(static fn (Product $product): int => (int) $product->getKey());
@@ -66,13 +68,29 @@ class CreatePurchaseInvoice
                 $product = $products->get((int) $item['product_id']);
 
                 $quantityMilli = DecimalQuantity::toMilli($item['quantity']);
+                $requestedUnitId = isset($item['unit_id']) && $item['unit_id'] !== '' ? (int) $item['unit_id'] : null;
+                $unit = ProductUnitOptions::resolve($product, $requestedUnitId);
+                if ($unit === null) {
+                    throw ValidationException::withMessages([
+                        'items' => 'وحدة القياس المختارة غير مفعلة للمنتج «'.$product->name.'».',
+                    ]);
+                }
+                $baseQuantityMilli = intdiv(($quantityMilli * $unit['factorMilli']) + 500, 1000);
+                if ($baseQuantityMilli <= 0) {
+                    throw ValidationException::withMessages(['items' => 'الكمية بعد تحويل وحدة القياس صغيرة جدًا أو غير صالحة.']);
+                }
                 $unitCostCents = DecimalMoney::toCents($item['unit_cost']);
+                if ($unitCostCents < 0 || $unitCostCents > 999_999_999) {
+                    throw ValidationException::withMessages(['items' => 'تكلفة الوحدة خارج النطاق المسموح به.']);
+                }
                 $lineTotalCents = intdiv(($quantityMilli * $unitCostCents) + 500, 1000);
                 $totalCents += $lineTotalCents;
 
                 $preparedItems[] = [
                     'product' => $product,
+                    'unit' => $unit,
                     'quantity_milli' => $quantityMilli,
+                    'base_quantity_milli' => $baseQuantityMilli,
                     'quantity' => DecimalQuantity::fromMilli($quantityMilli),
                     'unit_cost_cents' => $unitCostCents,
                     'unit_cost' => DecimalMoney::fromCents($unitCostCents),
@@ -122,8 +140,11 @@ class CreatePurchaseInvoice
                     'product_id' => $product->getKey(),
                     'product_sku_snapshot' => $product->sku,
                     'product_name_snapshot' => $product->name,
-                    'unit_name_snapshot' => $product->baseUnit?->name_ar ?? 'وحدة أساسية',
+                    'unit_id' => $item['unit']['persistedId'],
+                    'unit_name_snapshot' => $item['unit']['unitName'],
+                    'unit_conversion_factor_snapshot' => $item['unit']['factorToBase'],
                     'quantity' => $item['quantity'],
+                    'quantity_in_base' => DecimalQuantity::fromMilli($item['base_quantity_milli']),
                     'unit_cost' => $item['unit_cost'],
                     'line_total' => $item['line_total'],
                 ]);
@@ -144,7 +165,7 @@ class CreatePurchaseInvoice
                     ]);
                 }
 
-                $newMilli = DecimalQuantity::toMilli((string) $balance->quantity) + $item['quantity_milli'];
+                $newMilli = DecimalQuantity::toMilli((string) $balance->quantity) + $item['base_quantity_milli'];
                 $balance->quantity = DecimalQuantity::fromMilli($newMilli);
                 $balance->save();
 
@@ -154,7 +175,7 @@ class CreatePurchaseInvoice
                     'product_id' => $product->getKey(),
                     'created_by' => $data->createdBy,
                     'movement_type' => 'purchase',
-                    'quantity_delta' => $item['quantity'],
+                    'quantity_delta' => DecimalQuantity::fromMilli($item['base_quantity_milli']),
                     'balance_after' => DecimalQuantity::fromMilli($newMilli),
                     'source' => 'purchase_invoice',
                     'reason' => 'استلام من فاتورة شراء '.$invoice->invoice_number,
@@ -162,9 +183,17 @@ class CreatePurchaseInvoice
                     'reference_id' => $invoice->getKey(),
                 ]);
 
-                // Product purchase_price represents the most recent received base-unit cost.
-                $product->purchase_price = $item['unit_cost'];
+                // Product purchase_price stays in the base unit. Keep an explicit cost for
+                // this package unit when one was purchased; otherwise derive the base-unit cost.
+                $baseCostCents = intdiv(($item['unit_cost_cents'] * 1000) + intdiv($item['unit']['factorMilli'], 2), $item['unit']['factorMilli']);
+                $product->purchase_price = DecimalMoney::fromCents($baseCostCents);
                 $product->save();
+                if ($item['unit']['persistedId'] !== null) {
+                    ProductUnitConversion::query()
+                        ->where('product_id', $product->getKey())
+                        ->where('unit_id', $item['unit']['persistedId'])
+                        ->update(['purchase_price' => $item['unit_cost'], 'updated_at' => now()]);
+                }
             }
 
             $previousCredit = DecimalMoney::toCents((string) $supplier->transactions()->sum('credit'));

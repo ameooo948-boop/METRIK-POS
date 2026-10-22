@@ -4,7 +4,7 @@ namespace App\Data\Purchasing;
 
 final readonly class CreatePurchaseInvoiceData
 {
-    /** @param list<array{product_id:int, quantity:string, unit_cost:string}> $items */
+    /** @param list<array{product_id:int, quantity:string, unit_cost:string, unit_id?:?int}> $items */
     public function __construct(
         public int $organizationId,
         public int $branchId,
@@ -27,6 +27,7 @@ final readonly class CreatePurchaseInvoiceData
             'product_id' => (int) $item['product_id'],
             'quantity' => (string) $item['quantity'],
             'unit_cost' => (string) $item['unit_cost'],
+            'unit_id' => isset($item['unit_id']) && $item['unit_id'] !== '' ? (int) $item['unit_id'] : null,
         ], $data['items']);
 
         return new self(

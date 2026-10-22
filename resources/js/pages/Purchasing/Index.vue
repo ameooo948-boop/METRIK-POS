@@ -15,7 +15,7 @@ const props = defineProps({
 
 function initialLine() {
     const product = props.products[0];
-    return { product_id: product?.id ?? '', quantity: '1.000', unit_cost: product?.purchasePrice ?? '0.00' };
+    return { product_id: product?.id ?? '', unit_id: product?.baseUnit?.id ?? '', quantity: '1.000', unit_cost: product?.purchasePrice ?? '0.00' };
 }
 
 const form = useForm({
@@ -35,10 +35,25 @@ const estimatedDue = computed(() => Math.max(0, estimatedTotal.value - Number(fo
 
 function addLine() { form.items.push(initialLine()); }
 function removeLine(index) { if (form.items.length > 1) form.items.splice(index, 1); }
-function changeProduct(item) {
-    const product = props.products.find((candidate) => Number(candidate.id) === Number(item.product_id));
-    if (product) item.unit_cost = product.purchasePrice ?? '0.00';
+function getProduct(item) {
+    return props.products.find((candidate) => Number(candidate.id) === Number(item.product_id));
 }
+function getUnits(item) {
+    const product = getProduct(item);
+    return product?.units?.length ? product.units : [{ id: product?.baseUnit?.id, unitName: product?.baseUnit?.name_ar || 'وحدة أساسية', factorToBase: '1.000', purchasePrice: product?.purchasePrice ?? '0.00', isBase: true }];
+}
+function changeProduct(item) {
+    const product = getProduct(item);
+    if (product) {
+        item.unit_id = product.baseUnit?.id ?? '';
+        item.unit_cost = product.purchasePrice ?? '0.00';
+    }
+}
+function changeUnit(item) {
+    const unit = getUnits(item).find((candidate) => Number(candidate.id) === Number(item.unit_id));
+    if (unit) item.unit_cost = unit.purchasePrice ?? '0.00';
+}
+
 function submitInvoice() {
     form.post('/purchase-invoices', { preserveScroll: true, onSuccess: () => form.reset() });
 }
@@ -53,7 +68,7 @@ function quantity(value) {
 <template>
     <Head title="فواتير الشراء | Metrik POS" />
     <main dir="rtl" class="min-h-screen bg-slate-950 text-slate-100">
-        <header class="border-b border-white/10 bg-slate-900/80"><div class="mx-auto flex max-w-7xl items-center justify-between gap-4 px-5 py-4"><div><p class="font-black tracking-wide">METRIK <span class="text-emerald-300">POS</span></p><p class="mt-1 text-sm text-slate-400">{{ organization.name }} · {{ currentBranch.name }}</p></div><div class="flex flex-wrap items-center gap-2"><Link href="/suppliers" class="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold hover:border-emerald-300/60">الموردون</Link><Link href="/supplier-payments" class="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold hover:border-emerald-300/60">دفعات الموردين</Link><Link href="/purchase-returns" class="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold hover:border-emerald-300/60">مرتجعات الشراء</Link><Link href="/products" class="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold hover:border-emerald-300/60">المنتجات</Link><Link href="/dashboard" class="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold hover:border-emerald-300/60">لوحة التحكم</Link></div></div></header>
+        <header class="border-b border-white/10 bg-slate-900/80"><div class="mx-auto flex max-w-7xl items-center justify-between gap-4 px-5 py-4"><div><p class="font-black tracking-wide">METRIK <span class="text-emerald-300">POS</span></p><p class="mt-1 text-sm text-slate-400">{{ organization.name }} · {{ currentBranch.name }}</p></div><div class="flex flex-wrap items-center gap-2"><Link href="/suppliers" class="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold hover:border-emerald-300/60">الموردون</Link><Link href="/products" class="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold hover:border-emerald-300/60">المنتجات</Link><Link href="/dashboard" class="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold hover:border-emerald-300/60">لوحة التحكم</Link></div></div></header>
         <div class="mx-auto max-w-7xl space-y-8 px-5 py-8 sm:py-10">
             <section><p class="text-sm font-semibold text-emerald-300">المشتريات والاستلام</p><h1 class="mt-2 text-3xl font-black sm:text-4xl">فواتير الشراء</h1><p class="mt-3 max-w-3xl leading-7 text-slate-400">حفظ الفاتورة يستلم الأصناف فورًا في الفرع الحالي، ويحدّث دفتر المورد. سجّل الكميات بوحدة القياس الأساسية المعروضة لكل منتج.</p></section>
             <div v-if="flashMessage" class="rounded-xl border border-emerald-300/20 bg-emerald-300/10 px-4 py-3 text-sm text-emerald-200" role="status">{{ flashMessage }}</div>
@@ -73,8 +88,9 @@ function quantity(value) {
                         <div class="flex items-center justify-between gap-3"><h3 class="font-bold">أصناف الفاتورة</h3><button type="button" :disabled="form.items.length >= 100 || !products.length" @click="addLine" class="rounded-xl border border-white/10 px-3 py-2 text-sm font-semibold hover:border-emerald-300/60 disabled:opacity-40">+ إضافة صنف</button></div>
                         <div v-for="(item, index) in form.items" :key="index" class="grid gap-3 rounded-xl border border-white/10 bg-slate-950/60 p-4 md:grid-cols-[minmax(0,1.6fr)_minmax(100px,0.6fr)_minmax(120px,0.8fr)_auto]">
                             <div><label :for="`item-product-${index}`" class="mb-2 block text-sm font-medium">المنتج *</label><select :id="`item-product-${index}`" v-model="item.product_id" required :disabled="!products.length" @change="changeProduct(item)" class="w-full rounded-lg border border-white/10 bg-slate-900 px-3 py-3 outline-none focus:border-emerald-300"><option v-for="product in products" :key="product.id" :value="product.id">{{ product.name }} — {{ product.sku }} ({{ product.baseUnit?.name_ar || 'وحدة أساسية' }})</option></select><p v-if="form.errors[`items.${index}.product_id`]" class="mt-1 text-sm text-rose-300">{{ form.errors[`items.${index}.product_id`] }}</p></div>
+                            <div><label :for="`item-unit-${index}`" class="mb-2 block text-sm font-medium">وحدة الشراء *</label><select :id="`item-unit-${index}`" v-model="item.unit_id" required @change="changeUnit(item)" class="w-full rounded-lg border border-white/10 bg-slate-900 px-3 py-3 outline-none focus:border-emerald-300"><option v-for="unit in getUnits(item)" :key="unit.id" :value="unit.id">{{ unit.unitName }}</option></select><p v-if="form.errors[`items.${index}.unit_id`]" class="mt-1 text-sm text-rose-300">{{ form.errors[`items.${index}.unit_id`] }}</p></div>
                             <div><label :for="`item-quantity-${index}`" class="mb-2 block text-sm font-medium">الكمية *</label><input :id="`item-quantity-${index}`" v-model="item.quantity" type="number" min="0.001" max="10000" step="0.001" required class="w-full rounded-lg border border-white/10 bg-slate-900 px-3 py-3 outline-none focus:border-emerald-300"><p v-if="form.errors[`items.${index}.quantity`]" class="mt-1 text-sm text-rose-300">{{ form.errors[`items.${index}.quantity`] }}</p></div>
-                            <div><label :for="`item-cost-${index}`" class="mb-2 block text-sm font-medium">تكلفة الوحدة (ج.م) *</label><input :id="`item-cost-${index}`" v-model="item.unit_cost" type="number" min="0" max="9999999.99" step="0.01" required class="w-full rounded-lg border border-white/10 bg-slate-900 px-3 py-3 outline-none focus:border-emerald-300"><p v-if="form.errors[`items.${index}.unit_cost`]" class="mt-1 text-sm text-rose-300">{{ form.errors[`items.${index}.unit_cost`] }}</p></div>
+                            <div><label :for="`item-cost-${index}`" class="mb-2 block text-sm font-medium">تكلفة الوحدة المختارة (ج.م) *</label><input :id="`item-cost-${index}`" v-model="item.unit_cost" type="number" min="0" max="9999999.99" step="0.01" required class="w-full rounded-lg border border-white/10 bg-slate-900 px-3 py-3 outline-none focus:border-emerald-300"><p v-if="form.errors[`items.${index}.unit_cost`]" class="mt-1 text-sm text-rose-300">{{ form.errors[`items.${index}.unit_cost`] }}</p></div>
                             <div class="flex items-end"><button type="button" :disabled="form.items.length <= 1" @click="removeLine(index)" class="w-full rounded-lg border border-rose-300/20 px-3 py-3 text-sm text-rose-200 hover:bg-rose-300/10 disabled:opacity-30">حذف</button></div>
                         </div>
                         <p v-if="form.errors.items" class="text-sm text-rose-300">{{ form.errors.items }}</p>
@@ -82,7 +98,7 @@ function quantity(value) {
 
                     <div class="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(300px,0.8fr)]">
                         <div><label for="purchase-notes" class="mb-2 block text-sm font-medium">ملاحظات</label><textarea id="purchase-notes" v-model="form.notes" rows="3" maxlength="3000" class="w-full rounded-xl border border-white/10 bg-slate-950 px-4 py-3 outline-none focus:border-emerald-300" placeholder="ملاحظات داخلية اختيارية"></textarea><p v-if="form.errors.notes" class="mt-1 text-sm text-rose-300">{{ form.errors.notes }}</p></div>
-                        <div class="space-y-3 rounded-xl border border-white/10 bg-slate-950 p-4"><div class="flex justify-between gap-3"><span class="text-slate-400">الإجمالي التقديري</span><strong>{{ money(estimatedTotal) }} ج.م</strong></div><div class="flex justify-between gap-3"><span class="text-slate-400">المدفوع</span><strong>{{ money(form.paid_amount) }} ج.م</strong></div><div class="flex justify-between gap-3 border-t border-white/10 pt-3"><span class="text-slate-300">المتبقي التقديري</span><strong class="text-amber-200">{{ money(estimatedDue) }} ج.م</strong></div><p class="text-xs leading-5 text-slate-500">الإجمالي النهائي يُعاد حسابه على الخادم ويُقرب كل سطر إلى قرشين.</p></div>
+                        <div class="space-y-3 rounded-xl border border-white/10 bg-slate-950 p-4"><div class="flex justify-between gap-3"><span class="text-slate-400">الإجمالي التقديري</span><strong>{{ money(estimatedTotal) }} ج.م</strong></div><div class="flex justify-between gap-3"><span class="text-slate-400">المدفوع</span><strong>{{ money(form.paid_amount) }} ج.م</strong></div><div class="flex justify-between gap-3 border-t border-white/10 pt-3"><span class="text-slate-300">المتبقي التقديري</span><strong class="text-amber-200">{{ money(estimatedDue) }} ج.م</strong></div><p class="text-xs leading-5 text-slate-500">أرصدة المخزون محفوظة بالوحدة الأساسية. تكلفة الوحدة المختارة تُحوّل حسب معامل المنتج ويُقرب كل سطر إلى قرشين على الخادم.</p></div>
                     </div>
                     <button type="submit" :disabled="form.processing || !suppliers.length || !products.length" class="rounded-xl bg-emerald-300 px-5 py-3 font-bold text-slate-950 disabled:cursor-not-allowed disabled:opacity-50">{{ form.processing ? 'جارٍ حفظ الفاتورة...' : 'اعتماد الفاتورة واستلام البضاعة' }}</button>
                 </form>

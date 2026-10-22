@@ -10,6 +10,7 @@ use App\Models\Product;
 use App\Models\PurchaseInvoice;
 use App\Models\Supplier;
 use App\Services\Purchasing\CreatePurchaseInvoice;
+use App\Support\ProductUnitOptions;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -35,7 +36,7 @@ class PurchaseInvoiceController extends Controller
                 'supplier:id,name',
                 'branch:id,name',
                 'createdBy:id,name',
-                'items:id,organization_id,purchase_invoice_id,product_id,product_sku_snapshot,product_name_snapshot,unit_name_snapshot,quantity,unit_cost,line_total',
+                'items:id,organization_id,purchase_invoice_id,product_id,unit_id,product_sku_snapshot,product_name_snapshot,unit_name_snapshot,unit_conversion_factor_snapshot,quantity,quantity_in_base,unit_cost,line_total',
             ])
             ->latest('id')
             ->paginate(15)
@@ -72,15 +73,16 @@ class PurchaseInvoiceController extends Controller
         $products = Product::query()
             ->forOrganization((int) $organization->getKey())
             ->active()
-            ->with('baseUnit:id,code,name_ar,name_en')
+            ->with(['baseUnit:id,code,name_ar,name_en', 'unitConversions.unit:id,code,name_ar,name_en'])
             ->orderBy('name')
-            ->get(['id', 'organization_id', 'base_unit_id', 'sku', 'name', 'purchase_price'])
+            ->get(['id', 'organization_id', 'base_unit_id', 'sku', 'name', 'purchase_price', 'selling_price'])
             ->map(static fn (Product $product): array => [
                 'id' => $product->getKey(),
                 'sku' => $product->sku,
                 'name' => $product->name,
-                'purchasePrice' => $product->purchase_price,
+                'purchasePrice' => (string) $product->purchase_price,
                 'baseUnit' => $product->baseUnit?->only(['id', 'name_ar', 'name_en']),
+                'units' => ProductUnitOptions::options($product),
             ])->values();
 
         return Inertia::render('Purchasing/Index', [

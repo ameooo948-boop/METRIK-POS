@@ -9,6 +9,7 @@ use App\Models\Customer;
 use App\Models\Organization;
 use App\Models\Product;
 use App\Models\Sale;
+use App\Support\ProductUnitOptions;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -139,7 +140,8 @@ class PointOfSaleController extends Controller
             ->where('id', '>', (int) ($validated['after_id'] ?? 0))
             ->with([
                 'baseUnit:id,name_ar,name_en',
-                'barcodes:id,product_id,barcode',
+                'barcodes:id,product_id,barcode,unit_id',
+                'unitConversions.unit:id,name_ar,name_en',
                 'inventoryBalances' => fn ($query) => $query->where('branch_id', $branch->getKey()),
             ])
             ->orderBy('id')
@@ -160,8 +162,13 @@ class PointOfSaleController extends Controller
                 'name' => $product->name,
                 'sellingPrice' => (string) $product->selling_price,
                 'stock' => (string) ($balance?->quantity ?? '0.000'),
+                'baseUnitId' => (int) $product->base_unit_id,
                 'unitName' => $product->baseUnit?->name_ar ?? $product->baseUnit?->name_en ?? 'وحدة',
+                'units' => ProductUnitOptions::options($product),
                 'barcodes' => $product->barcodes->pluck('barcode')->values()->all(),
+                'barcodeUnits' => $product->barcodes->map(static fn ($barcode): array => [
+                    'barcode' => (string) $barcode->barcode, 'unitId' => (int) $barcode->unit_id,
+                ])->values()->all(),
                 'catalogScopeKey' => (int) $product->organization_id.':'.(int) $branch->getKey(),
             ];
         })->values()->all();
@@ -205,23 +212,31 @@ class PointOfSaleController extends Controller
             ->search($term)
             ->with([
                 'baseUnit:id,name_ar,name_en',
-                'barcodes:id,product_id,barcode',
+                'barcodes:id,product_id,barcode,unit_id',
+                'unitConversions.unit:id,name_ar,name_en',
                 'inventoryBalances' => fn ($query) => $query->where('branch_id', $branchId),
             ])
             ->orderBy('name')
             ->limit($limit)
             ->get()
-            ->map(static function (Product $product): array {
+            ->map(static function (Product $product) use ($term): array {
                 $balance = $product->inventoryBalances->first();
+                $exactBarcode = $term !== '' ? $product->barcodes->firstWhere('barcode', $term) : null;
 
                 return [
-                    'id' => $product->getKey(),
+                    'id' => (int) $product->getKey(),
                     'sku' => $product->sku,
                     'name' => $product->name,
-                    'sellingPrice' => $product->selling_price,
-                    'stock' => $balance?->quantity ?? '0.000',
+                    'sellingPrice' => (string) $product->selling_price,
+                    'stock' => (string) ($balance?->quantity ?? '0.000'),
+                    'baseUnitId' => (int) $product->base_unit_id,
                     'unitName' => $product->baseUnit?->name_ar ?? $product->baseUnit?->name_en ?? 'وحدة',
-                    'barcodes' => $product->barcodes->pluck('barcode')->values(),
+                    'units' => ProductUnitOptions::options($product),
+                    'selectedUnitId' => $exactBarcode ? (int) $exactBarcode->unit_id : (int) $product->base_unit_id,
+                    'barcodes' => $product->barcodes->pluck('barcode')->values()->all(),
+                    'barcodeUnits' => $product->barcodes->map(static fn ($barcode): array => [
+                        'barcode' => (string) $barcode->barcode, 'unitId' => (int) $barcode->unit_id,
+                    ])->values()->all(),
                 ];
             })->values()->all();
     }

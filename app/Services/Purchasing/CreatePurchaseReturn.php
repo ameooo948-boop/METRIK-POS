@@ -96,6 +96,8 @@ class CreatePurchaseReturn
                 $returnedMilli = DecimalQuantity::toMilli((string) ($previous?->returned_quantity ?? '0.000'));
                 $requestedMilli = DecimalQuantity::toMilli($requested['quantity']);
                 $remainingMilli = $purchasedMilli - $returnedMilli;
+                $factorMilli = DecimalQuantity::toMilli((string) ($item->unit_conversion_factor_snapshot ?? '1.000'));
+                $baseQuantityMilli = intdiv(($requestedMilli * $factorMilli) + 500, 1000);
 
                 if ($requestedMilli <= 0 || $requestedMilli > $remainingMilli) {
                     throw ValidationException::withMessages([
@@ -111,7 +113,7 @@ class CreatePurchaseReturn
                     ->first();
 
                 $availableMilli = $balance ? DecimalQuantity::toMilli((string) $balance->quantity) : 0;
-                if ($requestedMilli > $availableMilli) {
+                if ($baseQuantityMilli > $availableMilli) {
                     throw ValidationException::withMessages([
                         'items' => 'الكمية الحالية بالمخزون غير كافية لإرجاع الصنف للمورد: '.$item->product_name_snapshot.'.',
                     ]);
@@ -128,6 +130,7 @@ class CreatePurchaseReturn
                 $preparedItems[] = [
                     'item' => $item,
                     'quantity_milli' => $requestedMilli,
+                    'base_quantity_milli' => $baseQuantityMilli,
                     'line_cents' => $lineCents,
                     'current_balance_milli' => $availableMilli,
                 ];
@@ -157,7 +160,8 @@ class CreatePurchaseReturn
                 $item = $prepared['item'];
                 $quantityMilli = $prepared['quantity_milli'];
                 $quantity = DecimalQuantity::fromMilli($quantityMilli);
-                $newBalanceMilli = $prepared['current_balance_milli'] - $quantityMilli;
+                $baseQuantityMilli = $prepared['base_quantity_milli'];
+                $newBalanceMilli = $prepared['current_balance_milli'] - $baseQuantityMilli;
 
                 PurchaseReturnItem::query()->create([
                     'organization_id' => $data->organizationId,
@@ -187,7 +191,7 @@ class CreatePurchaseReturn
                     'product_id' => $item->product_id,
                     'created_by' => $data->createdBy,
                     'movement_type' => 'purchase_return',
-                    'quantity_delta' => DecimalQuantity::fromMilli(-$quantityMilli),
+                    'quantity_delta' => DecimalQuantity::fromMilli(-$baseQuantityMilli),
                     'balance_after' => DecimalQuantity::fromMilli($newBalanceMilli),
                     'source' => 'purchase_return',
                     'reason' => 'إرجاع للمورد '.$return->return_number,

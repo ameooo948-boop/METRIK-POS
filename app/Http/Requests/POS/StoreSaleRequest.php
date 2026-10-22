@@ -56,7 +56,8 @@ class StoreSaleRequest extends FormRequest
             ],
             'notes' => ['nullable', 'string', 'max:1000'],
             'items' => ['required', 'array', 'min:1', 'max:60'],
-            'items.*' => ['required', 'array:product_id,quantity'],
+            'items.*' => ['required', 'array:product_id,quantity,unit_id'],
+            'items.*.unit_id' => ['nullable', 'integer', Rule::exists('units', 'id')],
             'items.*.product_id' => [
                 'required', 'integer', 'distinct',
                 Rule::exists('products', 'id')->where(fn ($query) => $query
@@ -76,6 +77,7 @@ class StoreSaleRequest extends FormRequest
             'customer_id' => 'العميل',
             'items' => 'أصناف الفاتورة',
             'items.*.product_id' => 'المنتج',
+            'items.*.unit_id' => 'وحدة القياس',
             'items.*.quantity' => 'الكمية',
         ];
     }
