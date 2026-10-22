@@ -87,6 +87,7 @@ function saveThreshold(product) {
                     <Link href="/products" class="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold hover:border-emerald-300/60">المنتجات</Link>
                     <Link href="/inventory/transfers" class="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold hover:border-emerald-300/60">تحويل المخزون</Link>
                     <Link href="/inventory/counts" class="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold hover:border-emerald-300/60">الجرد الفعلي</Link>
+                    <Link href="/inventory/valuation" class="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold hover:border-emerald-300/60">تقييم المخزون</Link>
                     <Link href="/dashboard" class="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold hover:border-emerald-300/60">لوحة التحكم</Link>
                 </nav>
             </div>
