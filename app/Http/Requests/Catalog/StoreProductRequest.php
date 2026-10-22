@@ -49,7 +49,7 @@ class StoreProductRequest extends FormRequest
             'category_id' => [
                 'nullable', 'integer',
                 Rule::exists('categories', 'id')->where(
-                    fn ($query) => $query->where('organization_id', $organizationId)
+                    fn ($query) => $query->where('organization_id', $organizationId)->where('is_active', true)
                 ),
             ],
             'base_unit_id' => ['required', 'integer', Rule::exists('units', 'id')],

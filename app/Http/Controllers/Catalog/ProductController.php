@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Catalog;
 use App\Data\Products\CreateProductData;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Catalog\StoreProductRequest;
+use App\Http\Requests\Catalog\UpdateProductRequest;
 use App\Models\Branch;
 use App\Models\Category;
 use App\Models\Organization;
@@ -14,6 +15,7 @@ use App\Services\Catalog\CreateProduct;
 use App\Services\Catalog\ImportProductsCsv;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 use Inertia\Response;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -73,7 +75,13 @@ class ProductController extends Controller
             'organization' => $organization->only(['id', 'name', 'currency']),
             'currentBranch' => $branch->only(['id', 'name', 'code']),
             'products' => $products,
-            'categories' => Category::query()->forOrganization((int) $organization->getKey())->orderBy('name')->get(['id', 'name']),
+            'categories' => Category::query()->forOrganization((int) $organization->getKey())->where('is_active', true)->orderBy('name')->get(['id', 'name']),
+            'allCategories' => Category::query()->forOrganization((int) $organization->getKey())->withCount('products')->orderBy('name')->get(['id', 'name', 'is_active'])->map(static fn (Category $category): array => [
+                'id' => $category->getKey(),
+                'name' => $category->name,
+                'isActive' => (bool) $category->is_active,
+                'productsCount' => (int) $category->products_count,
+            ])->values(),
             'units' => Unit::query()->orderBy('id')->get(['id', 'code', 'name_ar', 'name_en']),
             'filters' => ['search' => $search],
             'canManageCatalog' => $request->user()->can('manageCatalog', $organization),
@@ -104,6 +112,53 @@ class ProductController extends Controller
         $createProduct->handle($data);
 
         return redirect()->route('products.index')->with('success', 'تم حفظ المنتج وتسجيل رصيده الافتتاحي بنجاح.');
+    }
+
+    public function update(UpdateProductRequest $request, int $productId): RedirectResponse
+    {
+        /** @var Organization $organization */
+        $organization = $request->attributes->get('currentOrganization');
+        $data = $request->validated();
+
+        DB::transaction(function () use ($organization, $productId, $data): void {
+            $product = Product::query()
+                ->forOrganization((int) $organization->getKey())
+                ->whereKey($productId)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            $product->fill([
+                'name' => $data['name'],
+                'sku' => $data['sku'],
+                'description' => $data['description'] ?? null,
+                'category_id' => $data['category_id'] ?? null,
+                'purchase_price' => $data['purchase_price'],
+                'selling_price' => $data['selling_price'],
+                'low_stock_threshold' => $data['low_stock_threshold'],
+            ])->save();
+        });
+
+        return redirect()->route('products.index')->with('success', 'تم تحديث بيانات المنتج بنجاح. لم يتم تغيير أرصدة المخزون أو سجل الحركات.');
+    }
+
+    public function updateStatus(Request $request, int $productId): RedirectResponse
+    {
+        /** @var Organization $organization */
+        $organization = $request->attributes->get('currentOrganization');
+        $this->authorize('manageCatalog', $organization);
+        $validated = $request->validate(['is_active' => ['required', 'boolean']]);
+
+        $product = Product::query()
+            ->forOrganization((int) $organization->getKey())
+            ->whereKey($productId)
+            ->firstOrFail();
+        $product->is_active = (bool) $validated['is_active'];
+        $product->save();
+
+        return redirect()->route('products.index')->with(
+            'success',
+            $product->is_active ? 'تمت إعادة تفعيل المنتج.' : 'تمت أرشفة المنتج وإيقاف بيعه الجديد مع الاحتفاظ بسجلاته.'
+        );
     }
 
     public function export(Request $request): StreamedResponse|RedirectResponse

@@ -30,6 +30,7 @@ class CreateProduct
             if ($data->categoryId !== null) {
                 Category::query()
                     ->forOrganization($data->organizationId)
+                    ->where('is_active', true)
                     ->whereKey($data->categoryId)
                     ->firstOrFail();
             }

@@ -176,11 +176,12 @@ final class ImportProductsCsv
                 if (isset($input['category']) && $input['category'] !== '') {
                     $category = Category::query()
                         ->forOrganization((int) $organization->getKey())
+                        ->where('is_active', true)
                         ->whereRaw('LOWER(name) = ?', [mb_strtolower((string) $input['category'])])
                         ->first();
 
                     if ($category === null) {
-                        $this->recordError($errors, $failed, $rowNumber, 'التصنيف غير موجود في المؤسسة الحالية: '.$input['category'].'. أضف التصنيف أولًا.');
+                        $this->recordError($errors, $failed, $rowNumber, 'التصنيف غير موجود أو مؤرشف في المؤسسة الحالية: '.$input['category'].'. فعّل التصنيف أو اختر تصنيفًا نشطًا.');
                         continue;
                     }
                     $categoryId = (int) $category->getKey();

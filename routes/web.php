@@ -2,6 +2,9 @@
 
 use App\Http\Controllers\Audit\AuditLogController;
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
+use App\Http\Controllers\Auth\EmailVerificationController;
+use App\Http\Controllers\Auth\NewPasswordController;
+use App\Http\Controllers\Auth\PasswordResetLinkController;
 use App\Http\Controllers\Auth\RegisteredUserController;
 use App\Http\Controllers\Branches\BranchController;
 use App\Http\Controllers\Catalog\CategoryController;
@@ -56,15 +59,24 @@ Route::middleware(['guest', SecurityHeaders::class])->group(function () {
     Route::post('/login', [AuthenticatedSessionController::class, 'store'])->name('login.store');
     Route::get('/register', fn () => Inertia::render('Auth/Register'))->name('register');
     Route::post('/register', [RegisteredUserController::class, 'store'])->middleware('throttle:6,1')->name('register.store');
+    Route::get('/forgot-password', [PasswordResetLinkController::class, 'create'])->name('password.request');
+    Route::post('/forgot-password', [PasswordResetLinkController::class, 'store'])->middleware('throttle:6,1')->name('password.email');
+    Route::get('/reset-password/{token}', [NewPasswordController::class, 'create'])->name('password.reset');
+    Route::post('/reset-password', [NewPasswordController::class, 'store'])->middleware('throttle:6,1')->name('password.store');
 });
 
 Route::middleware(['auth', SecurityHeaders::class])->group(function () {
+    Route::get('/email/verify', [EmailVerificationController::class, 'notice'])->name('verification.notice');
+    Route::get('/email/verify/{id}/{hash}', [EmailVerificationController::class, 'verify'])
+        ->middleware(['signed', 'throttle:6,1'])->name('verification.verify');
+    Route::post('/email/verification-notification', [EmailVerificationController::class, 'resend'])
+        ->middleware('throttle:6,1')->name('verification.send');
     Route::get('/setup/organization', [OrganizationSetupController::class, 'create'])->name('organization.setup');
     Route::post('/setup/organization', [OrganizationSetupController::class, 'store'])->middleware('throttle:6,1')->name('organization.setup.store');
     Route::post('/organizations/{organization}/switch', SwitchOrganizationController::class)->name('organizations.switch');
     Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])->name('logout');
 
-    Route::middleware([ResolveOrganizationContext::class, RequestLogContext::class, AuditMutationRequests::class])->group(function () {
+    Route::middleware(['verified', ResolveOrganizationContext::class, RequestLogContext::class, AuditMutationRequests::class])->group(function () {
         Route::get('/dashboard', DashboardController::class)->name('dashboard');
         Route::get('/organization/settings/tax', [OrganizationTaxSettingsController::class, 'index'])->name('organization.tax-settings.index');
         Route::put('/organization/settings/tax', [OrganizationTaxSettingsController::class, 'update'])->name('organization.tax-settings.update');
@@ -88,6 +100,8 @@ Route::middleware(['auth', SecurityHeaders::class])->group(function () {
         Route::post('/products/import', [ProductController::class, 'import'])->middleware('throttle:10,1,products-import')->name('products.import');
         Route::get('/products', [ProductController::class, 'index'])->name('products.index');
         Route::post('/products', [ProductController::class, 'store'])->middleware('throttle:60,1')->name('products.store');
+        Route::patch('/products/{productId}', [ProductController::class, 'update'])->whereNumber('productId')->middleware('throttle:30,1')->name('products.update');
+        Route::patch('/products/{productId}/status', [ProductController::class, 'updateStatus'])->whereNumber('productId')->middleware('throttle:30,1')->name('products.status.update');
         Route::get('/products/{productId}/units', [ProductUnitController::class, 'edit'])->whereNumber('productId')->name('products.units.edit');
         Route::post('/products/{productId}/units', [ProductUnitController::class, 'storeConversion'])->whereNumber('productId')->middleware('throttle:30,1')->name('products.units.store');
         Route::patch('/products/{productId}/units/{conversionId}', [ProductUnitController::class, 'updateConversion'])->whereNumber('productId')->whereNumber('conversionId')->middleware('throttle:30,1')->name('products.units.update');
@@ -95,6 +109,8 @@ Route::middleware(['auth', SecurityHeaders::class])->group(function () {
         Route::post('/products/{productId}/barcodes', [ProductUnitController::class, 'storeBarcode'])->whereNumber('productId')->middleware('throttle:30,1')->name('products.barcodes.store');
         Route::delete('/products/{productId}/barcodes/{barcodeId}', [ProductUnitController::class, 'destroyBarcode'])->whereNumber('productId')->whereNumber('barcodeId')->middleware('throttle:30,1')->name('products.barcodes.destroy');
         Route::post('/categories', [CategoryController::class, 'store'])->middleware('throttle:30,1')->name('categories.store');
+        Route::patch('/categories/{categoryId}', [CategoryController::class, 'update'])->whereNumber('categoryId')->middleware('throttle:30,1')->name('categories.update');
+        Route::patch('/categories/{categoryId}/status', [CategoryController::class, 'updateStatus'])->whereNumber('categoryId')->middleware('throttle:30,1')->name('categories.status.update');
         Route::get('/promotions', [PromotionController::class, 'index'])->name('promotions.index');
         Route::post('/promotions', [PromotionController::class, 'store'])->middleware('throttle:30,1,promotions-store')->name('promotions.store');
         Route::post('/promotions/{promotionId}/toggle', [PromotionController::class, 'toggle'])->whereNumber('promotionId')->middleware('throttle:60,1,promotions-toggle')->name('promotions.toggle');
@@ -116,6 +132,8 @@ Route::middleware(['auth', SecurityHeaders::class])->group(function () {
         Route::get('/suppliers/performance', [SupplierPerformanceController::class, 'index'])->name('suppliers.performance.index');
         Route::get('/suppliers', [SupplierController::class, 'index'])->name('suppliers.index');
         Route::post('/suppliers', [SupplierController::class, 'store'])->middleware('throttle:30,1')->name('suppliers.store');
+        Route::patch('/suppliers/{supplierId}', [SupplierController::class, 'update'])->whereNumber('supplierId')->middleware('throttle:30,1')->name('suppliers.update');
+        Route::patch('/suppliers/{supplierId}/status', [SupplierController::class, 'updateStatus'])->whereNumber('supplierId')->middleware('throttle:30,1')->name('suppliers.status.update');
         Route::get('/purchase-orders', [PurchaseOrderController::class, 'index'])->name('purchase-orders.index');
         Route::post('/purchase-orders', [PurchaseOrderController::class, 'store'])->middleware('throttle:30,1')->name('purchase-orders.store');
         Route::post('/purchase-orders/{purchaseOrder}/receive', [PurchaseOrderController::class, 'receive'])->whereNumber('purchaseOrder')->middleware('throttle:30,1')->name('purchase-orders.receive');

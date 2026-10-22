@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Suppliers;
 use App\Data\Suppliers\CreateSupplierData;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Suppliers\StoreSupplierRequest;
+use App\Http\Requests\Suppliers\UpdateSupplierRequest;
 use App\Models\Organization;
 use App\Models\Supplier;
 use App\Services\Suppliers\CreateSupplier;
@@ -45,6 +46,7 @@ class SupplierController extends Controller
                     'phone' => $supplier->phone,
                     'email' => $supplier->email,
                     'address' => $supplier->address,
+                    'notes' => $supplier->notes,
                     'isActive' => $supplier->is_active,
                     'balance' => DecimalMoney::fromCents($credit - $debit),
                 ];
@@ -71,5 +73,31 @@ class SupplierController extends Controller
         ));
 
         return redirect()->route('suppliers.index')->with('success', 'تمت إضافة المورد بنجاح.');
+    }
+
+    public function update(UpdateSupplierRequest $request, int $supplierId): RedirectResponse
+    {
+        /** @var Organization $organization */
+        $organization = $request->attributes->get('currentOrganization');
+        $supplier = Supplier::query()->forOrganization((int) $organization->getKey())->whereKey($supplierId)->firstOrFail();
+        $supplier->fill($request->validated())->save();
+
+        return redirect()->route('suppliers.index')->with('success', 'تم تحديث بيانات المورد بنجاح.');
+    }
+
+    public function updateStatus(Request $request, int $supplierId): RedirectResponse
+    {
+        /** @var Organization $organization */
+        $organization = $request->attributes->get('currentOrganization');
+        $this->authorize('managePurchases', $organization);
+        $validated = $request->validate(['is_active' => ['required', 'boolean']]);
+        $supplier = Supplier::query()->forOrganization((int) $organization->getKey())->whereKey($supplierId)->firstOrFail();
+        $supplier->is_active = (bool) $validated['is_active'];
+        $supplier->save();
+
+        return redirect()->route('suppliers.index')->with(
+            'success',
+            $supplier->is_active ? 'تمت إعادة تفعيل المورد.' : 'تم إيقاف المورد عن فواتير الشراء الجديدة مع الاحتفاظ بكشف حسابه وسجلاته.'
+        );
     }
 }

@@ -72,6 +72,48 @@ class SupplierManagementTest extends TestCase
         $this->actingAs($cashier)->get(route('purchase-invoices.index'))->assertForbidden();
     }
 
+    public function test_owner_can_update_and_deactivate_supplier_without_deleting_its_history(): void
+    {
+        [$owner, $organization] = $this->createOrganizationFor('Supplier Lifecycle Market');
+        $supplier = Supplier::query()->create([
+            'organization_id' => $organization->getKey(), 'code' => 'LIFE-001',
+            'name' => 'مورد قديم', 'phone' => '01000000000', 'is_active' => true,
+        ]);
+
+        $this->actingAs($owner)->patch(route('suppliers.update', $supplier->getKey()), [
+            'name' => 'مورد معدل', 'code' => 'LIFE-001', 'phone' => '01111111111',
+            'email' => 'new@example.test', 'address' => 'عنوان جديد', 'notes' => 'ملاحظة',
+        ])->assertRedirect(route('suppliers.index'));
+
+        $this->assertDatabaseHas('suppliers', [
+            'id' => $supplier->getKey(), 'name' => 'مورد معدل', 'phone' => '01111111111',
+            'email' => 'new@example.test', 'organization_id' => $organization->getKey(),
+        ]);
+
+        $this->actingAs($owner)->patch(route('suppliers.status.update', $supplier->getKey()), ['is_active' => false])
+            ->assertRedirect(route('suppliers.index'));
+        $this->assertDatabaseHas('suppliers', [
+            'id' => $supplier->getKey(), 'is_active' => 0, 'deleted_at' => null,
+        ]);
+    }
+
+    public function test_supplier_updates_are_tenant_scoped_and_cashiers_cannot_modify_them(): void
+    {
+        [$owner] = $this->createOrganizationFor('Supplier Owner Boundary');
+        [, $otherOrganization, $otherBranch] = $this->createOrganizationFor('Supplier Foreign Boundary');
+        $supplier = Supplier::query()->create([
+            'organization_id' => $otherOrganization->getKey(), 'code' => 'BOUNDARY-01', 'name' => 'محمي',
+        ]);
+
+        $this->actingAs($owner)->patch(route('suppliers.status.update', $supplier->getKey()), ['is_active' => false])->assertNotFound();
+        $this->assertDatabaseHas('suppliers', ['id' => $supplier->getKey(), 'is_active' => 1]);
+
+        $cashier = User::factory()->create();
+        $otherOrganization->users()->attach($cashier->getKey(), ['role' => 'cashier', 'is_default' => true]);
+        $otherBranch->users()->attach($cashier->getKey());
+        $this->actingAs($cashier)->patch(route('suppliers.status.update', $supplier->getKey()), ['is_active' => false])->assertForbidden();
+    }
+
     private function createOrganizationFor(string $name): array
     {
         $user = User::factory()->create();

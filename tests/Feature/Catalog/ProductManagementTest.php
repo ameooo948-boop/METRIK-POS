@@ -207,6 +207,85 @@ class ProductManagementTest extends TestCase
             ->assertForbidden();
     }
 
+    public function test_owner_can_update_product_details_without_mutating_inventory(): void
+    {
+        [$owner, $organization, $branch] = $this->createOrganizationFor('Product Update Market');
+        $product = Product::query()->create([
+            'organization_id' => $organization->getKey(), 'base_unit_id' => $this->unitId('piece'),
+            'sku' => 'EDIT-001', 'name' => 'اسم قديم', 'purchase_price' => '5.00',
+            'selling_price' => '8.00', 'low_stock_threshold' => '2.000', 'is_active' => true,
+        ]);
+        InventoryBalance::query()->create([
+            'organization_id' => $organization->getKey(), 'branch_id' => $branch->getKey(),
+            'product_id' => $product->getKey(), 'quantity' => '12.000',
+        ]);
+
+        $this->actingAs($owner)->patch(route('products.update', $product->getKey()), [
+            'name' => 'اسم معدل', 'sku' => 'EDIT-001', 'description' => 'وصف',
+            'category_id' => '', 'purchase_price' => '6.25', 'selling_price' => '9.50',
+            'low_stock_threshold' => '3.000',
+        ])->assertRedirect(route('products.index'));
+
+        $this->assertDatabaseHas('products', [
+            'id' => $product->getKey(), 'organization_id' => $organization->getKey(),
+            'name' => 'اسم معدل', 'purchase_price' => '6.25', 'selling_price' => '9.50',
+        ]);
+        $this->assertDatabaseHas('inventory_balances', [
+            'product_id' => $product->getKey(), 'branch_id' => $branch->getKey(), 'quantity' => '12.000',
+        ]);
+    }
+
+    public function test_product_can_be_archived_and_reactivated_without_deleting_history(): void
+    {
+        [$owner, $organization] = $this->createOrganizationFor('Product Archive Market');
+        $product = Product::query()->create([
+            'organization_id' => $organization->getKey(), 'base_unit_id' => $this->unitId('piece'),
+            'sku' => 'ARCH-001', 'name' => 'منتج أرشفة', 'purchase_price' => '1.00',
+            'selling_price' => '2.00', 'low_stock_threshold' => '0.000', 'is_active' => true,
+        ]);
+
+        $this->actingAs($owner)->patch(route('products.status.update', $product->getKey()), ['is_active' => false])
+            ->assertRedirect(route('products.index'));
+        $this->assertDatabaseHas('products', ['id' => $product->getKey(), 'is_active' => 0, 'deleted_at' => null]);
+
+        $this->actingAs($owner)->patch(route('products.status.update', $product->getKey()), ['is_active' => true])
+            ->assertRedirect(route('products.index'));
+        $this->assertDatabaseHas('products', ['id' => $product->getKey(), 'is_active' => 1, 'deleted_at' => null]);
+    }
+
+    public function test_product_update_cannot_cross_organization_boundary(): void
+    {
+        [$owner] = $this->createOrganizationFor('Product Owner Market');
+        [, $otherOrganization] = $this->createOrganizationFor('Product Foreign Market');
+        $product = Product::query()->create([
+            'organization_id' => $otherOrganization->getKey(), 'base_unit_id' => $this->unitId('piece'),
+            'sku' => 'FOREIGN-001', 'name' => 'منتج خارجي', 'purchase_price' => '1.00',
+            'selling_price' => '2.00', 'low_stock_threshold' => '0.000', 'is_active' => true,
+        ]);
+
+        $this->actingAs($owner)->patch(route('products.status.update', $product->getKey()), ['is_active' => false])->assertNotFound();
+        $this->assertDatabaseHas('products', ['id' => $product->getKey(), 'name' => 'منتج خارجي', 'is_active' => 1]);
+    }
+
+    public function test_category_can_be_renamed_and_archived_without_deleting_it(): void
+    {
+        [$owner, $organization] = $this->createOrganizationFor('Category Lifecycle Market');
+        $category = Category::query()->create(['organization_id' => $organization->getKey(), 'name' => 'قديم']);
+
+        $this->actingAs($owner)->patch(route('categories.update', $category->getKey()), ['name' => 'معدل'])
+            ->assertRedirect(route('products.index'));
+        $this->assertDatabaseHas('categories', ['id' => $category->getKey(), 'name' => 'معدل']);
+
+        $this->actingAs($owner)->patch(route('categories.status.update', $category->getKey()), ['is_active' => false])
+            ->assertRedirect(route('products.index'));
+        $this->assertDatabaseHas('categories', ['id' => $category->getKey(), 'is_active' => 0]);
+
+        [$otherOwner, $otherOrganization] = $this->createOrganizationFor('Foreign Category Market');
+        $foreignCategory = Category::query()->create(['organization_id' => $otherOrganization->getKey(), 'name' => 'تصنيف محمي']);
+        $this->actingAs($owner)->patch(route('categories.status.update', $foreignCategory->getKey()), ['is_active' => false])->assertNotFound();
+        $this->assertDatabaseHas('categories', ['id' => $foreignCategory->getKey(), 'is_active' => 1]);
+    }
+
     private function createOrganizationFor(string $name): array
     {
         $user = User::factory()->create();

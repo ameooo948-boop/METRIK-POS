@@ -2,6 +2,8 @@
 import { Link, useForm } from '@inertiajs/vue3';
 import AuthLayout from '../../layouts/AuthLayout.vue';
 
+defineProps({ status: { type: String, default: null } });
+
 const form = useForm({
     email: '',
     password: '',
@@ -17,6 +19,7 @@ function submit() {
 
 <template>
     <AuthLayout title="تسجيل الدخول" description="سجّل دخولك لمتابعة إدارة نشاطك وفروعك.">
+        <div v-if="status" class="mb-4 rounded-xl border border-emerald-300/20 bg-emerald-300/10 px-4 py-3 text-sm text-emerald-200" role="status">{{ status }}</div>
         <form class="space-y-5" @submit.prevent="submit">
             <div>
                 <label for="email" class="mb-2 block text-sm font-medium text-slate-200">البريد الإلكتروني</label>
@@ -48,6 +51,10 @@ function submit() {
                     placeholder="أدخل كلمة المرور"
                 >
                 <p v-if="form.errors.password" class="mt-2 text-sm text-rose-300">{{ form.errors.password }}</p>
+            </div>
+
+            <div class="flex justify-end -mt-2">
+                <Link href="/forgot-password" class="text-sm font-semibold text-emerald-300 hover:text-emerald-200">نسيت كلمة المرور؟</Link>
             </div>
 
             <label class="flex cursor-pointer items-center gap-2 text-sm text-slate-400">

@@ -7,6 +7,7 @@ const props = defineProps({
     currentBranch: { type: Object, required: true },
     products: { type: Object, required: true },
     categories: { type: Array, required: true },
+    allCategories: { type: Array, default: () => [] },
     units: { type: Array, required: true },
     filters: { type: Object, required: true },
     canManageCatalog: { type: Boolean, required: true },
@@ -18,7 +19,17 @@ const props = defineProps({
 
 const searchTerm = ref(props.filters.search ?? '');
 const selectedProduct = ref(null);
+const editingProduct = ref(null);
+const editingCategory = ref(null);
 const unitOptions = computed(() => props.units ?? []);
+const editCategoryOptions = computed(() => {
+    const options = [...props.categories];
+    const current = editingProduct.value?.category;
+    if (current && !options.some((category) => Number(category.id) === Number(current.id))) {
+        options.push({ ...current, isArchived: true });
+    }
+    return options;
+});
 
 const productForm = useForm({
     name: '',
@@ -34,6 +45,8 @@ const productForm = useForm({
 });
 
 const categoryForm = useForm({ name: '' });
+const editProductForm = useForm({ name: '', sku: '', description: '', category_id: '', purchase_price: '0.00', selling_price: '0.00', low_stock_threshold: '0.000' });
+const editCategoryForm = useForm({ name: '' });
 const importForm = useForm({ file: null });
 const adjustmentForm = useForm({
     product_id: null,
@@ -60,6 +73,35 @@ function createProduct() {
     });
 }
 
+function startEditProduct(product) {
+    editingProduct.value = product;
+    editProductForm.clearErrors();
+    editProductForm.name = product.name ?? '';
+    editProductForm.sku = product.sku ?? '';
+    editProductForm.description = product.description ?? '';
+    editProductForm.category_id = props.categories.some((category) => Number(category.id) === Number(product.category?.id)) ? product.category.id : '';
+    editProductForm.purchase_price = String(product.purchasePrice ?? '0.00');
+    editProductForm.selling_price = String(product.sellingPrice ?? '0.00');
+    editProductForm.low_stock_threshold = String(product.globalLowStockThreshold ?? product.lowStockThreshold ?? '0.000');
+}
+
+function saveProductChanges() {
+    if (!editingProduct.value) return;
+    editProductForm.patch(`/products/${editingProduct.value.id}`, {
+        preserveScroll: true,
+        onSuccess: () => { editingProduct.value = null; editProductForm.reset(); },
+    });
+}
+
+function toggleProductStatus(product) {
+    const nextActive = !product.isActive;
+    const message = nextActive
+        ? `إعادة تفعيل المنتج «${product.name}»؟`
+        : `أرشفة المنتج «${product.name}» وإيقاف بيعه الجديد؟ ستظل فواتيره وحركاته محفوظة.`;
+    if (!window.confirm(message)) return;
+    router.patch(`/products/${product.id}/status`, { is_active: nextActive }, { preserveScroll: true });
+}
+
 function selectImportFile(event) {
     importForm.file = event.target.files?.[0] ?? null;
     importForm.clearErrors('file');
@@ -78,6 +120,26 @@ function createCategory() {
         preserveScroll: true,
         onSuccess: () => categoryForm.reset('name'),
     });
+}
+
+function startEditCategory(category) {
+    editingCategory.value = category;
+    editCategoryForm.clearErrors();
+    editCategoryForm.name = category.name;
+}
+
+function saveCategoryChanges() {
+    if (!editingCategory.value) return;
+    editCategoryForm.patch(`/categories/${editingCategory.value.id}`, {
+        preserveScroll: true,
+        onSuccess: () => { editingCategory.value = null; editCategoryForm.reset(); },
+    });
+}
+
+function toggleCategoryStatus(category) {
+    const nextActive = !category.isActive;
+    if (!window.confirm(nextActive ? `إعادة تفعيل التصنيف «${category.name}»؟` : `أرشفة التصنيف «${category.name}»؟ ستظل المنتجات القديمة مرتبطة به.`)) return;
+    router.patch(`/categories/${category.id}/status`, { is_active: nextActive }, { preserveScroll: true });
 }
 
 function startAdjustment(product) {
@@ -269,9 +331,12 @@ function formatMoney(value) {
                         </button>
                     </form>
                     <div class="mt-7 border-t border-white/10 pt-5">
-                        <h3 class="font-semibold">التصنيفات الحالية</h3>
-                        <div v-if="categories.length" class="mt-3 flex flex-wrap gap-2">
-                            <span v-for="category in categories" :key="category.id" class="rounded-full border border-white/10 bg-slate-950 px-3 py-1.5 text-sm text-slate-300">{{ category.name }}</span>
+                        <h3 class="font-semibold">إدارة التصنيفات</h3>
+                        <div v-if="allCategories.length" class="mt-3 space-y-2">
+                            <div v-for="category in allCategories" :key="category.id" class="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-slate-950/60 p-3">
+                                <div class="min-w-0"><p class="truncate text-sm font-semibold">{{ category.name }}</p><p class="mt-1 text-xs text-slate-500">{{ category.productsCount }} منتج · {{ category.isActive ? 'نشط' : 'مؤرشف' }}</p></div>
+                                <div class="flex shrink-0 gap-2"><button type="button" class="rounded-lg border border-white/10 px-2.5 py-1.5 text-xs font-semibold hover:border-emerald-300/60" @click="startEditCategory(category)">تعديل</button><button type="button" class="rounded-lg border border-white/10 px-2.5 py-1.5 text-xs font-semibold" :class="category.isActive ? 'text-amber-200 hover:border-amber-300/50' : 'text-emerald-200 hover:border-emerald-300/50'" @click="toggleCategoryStatus(category)">{{ category.isActive ? 'أرشفة' : 'تفعيل' }}</button></div>
+                            </div>
                         </div>
                         <p v-else class="mt-3 text-sm text-slate-500">لم تتم إضافة تصنيفات بعد.</p>
                     </div>
@@ -317,10 +382,10 @@ function formatMoney(value) {
                                 </td>
                                 <td class="px-5 py-4 text-slate-300" dir="ltr"><div class="flex flex-wrap gap-1"><span v-for="barcode in product.barcodes" :key="barcode.id" class="rounded bg-white/5 px-2 py-1 text-xs">{{ barcode.barcode }}</span><span v-if="!product.barcodes.length">—</span></div></td>
                                 <td class="px-5 py-4">
-                                    <span :class="product.isActive ? 'text-emerald-200' : 'text-slate-500'">{{ product.isActive ? 'نشط' : 'متوقف' }}</span>
+                                    <span :class="product.isActive ? 'text-emerald-200' : 'text-slate-500'">{{ product.isActive ? 'نشط' : 'مؤرشف / متوقف' }}</span>
                                 </td>
                                 <td class="px-5 py-4">
-                                    <div class="flex flex-col items-start gap-2"><Link v-if="canManageCatalog" :href="`/products/${product.id}/units`" class="whitespace-nowrap rounded-lg border border-emerald-300/30 px-3 py-2 font-semibold text-emerald-200 hover:bg-emerald-300/10">الوحدات والباركود</Link><button v-if="canManageInventory && product.isActive" type="button" @click="startAdjustment(product)" class="whitespace-nowrap rounded-lg border border-white/10 px-3 py-2 font-semibold hover:border-emerald-300/60">تسوية المخزون</button><span v-if="!canManageCatalog && !canManageInventory" class="text-xs text-slate-500">—</span></div>
+                                    <div class="flex flex-col items-start gap-2"><button v-if="canManageCatalog" type="button" @click="startEditProduct(product)" class="whitespace-nowrap rounded-lg border border-white/10 px-3 py-2 font-semibold hover:border-emerald-300/60">تعديل البيانات</button><button v-if="canManageCatalog" type="button" @click="toggleProductStatus(product)" class="whitespace-nowrap rounded-lg border border-white/10 px-3 py-2 font-semibold" :class="product.isActive ? 'text-amber-200 hover:border-amber-300/50' : 'text-emerald-200 hover:border-emerald-300/50'">{{ product.isActive ? 'أرشفة المنتج' : 'إعادة التفعيل' }}</button><Link v-if="canManageCatalog" :href="`/products/${product.id}/units`" class="whitespace-nowrap rounded-lg border border-emerald-300/30 px-3 py-2 font-semibold text-emerald-200 hover:bg-emerald-300/10">الوحدات والباركود</Link><button v-if="canManageInventory && product.isActive" type="button" @click="startAdjustment(product)" class="whitespace-nowrap rounded-lg border border-white/10 px-3 py-2 font-semibold hover:border-emerald-300/60">تسوية المخزون</button><span v-if="!canManageCatalog && !canManageInventory" class="text-xs text-slate-500">—</span></div>
                                 </td>
                             </tr>
                         </tbody>
@@ -337,6 +402,29 @@ function formatMoney(value) {
                         <Link v-if="link.url" :href="link.url" preserve-scroll class="rounded-lg border px-3 py-2 text-sm" :class="link.active ? 'border-emerald-300 bg-emerald-300 text-slate-950' : 'border-white/10 text-slate-300 hover:border-emerald-300/60'" v-html="link.label" />
                         <span v-else class="rounded-lg border border-white/5 px-3 py-2 text-sm text-slate-600" v-html="link.label" />
                     </template>
+                </div>
+            </section>
+
+            <section v-if="editingProduct" class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" @click.self="editingProduct = null">
+                <div class="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-white/10 bg-slate-900 p-5 shadow-2xl sm:p-7" role="dialog" aria-modal="true" aria-labelledby="edit-product-title">
+                    <div class="flex items-start justify-between gap-4"><div><h2 id="edit-product-title" class="text-xl font-bold">تعديل بيانات المنتج</h2><p class="mt-1 text-sm text-slate-400">تعديل البيانات لا يغير الرصيد الحالي أو سجل المخزون أو الفواتير القديمة.</p></div><button type="button" @click="editingProduct = null" class="rounded-lg border border-white/10 px-3 py-2 text-sm">إغلاق</button></div>
+                    <form class="mt-6 grid gap-4 sm:grid-cols-2" @submit.prevent="saveProductChanges">
+                        <div><label for="edit-product-name" class="mb-2 block text-sm font-medium">اسم المنتج *</label><input id="edit-product-name" v-model="editProductForm.name" required maxlength="180" class="w-full rounded-xl border border-white/10 bg-slate-950 px-4 py-3 outline-none focus:border-emerald-300"><p v-if="editProductForm.errors.name" class="mt-1 text-sm text-rose-300">{{ editProductForm.errors.name }}</p></div>
+                        <div><label for="edit-product-sku" class="mb-2 block text-sm font-medium">كود المنتج *</label><input id="edit-product-sku" v-model="editProductForm.sku" required maxlength="64" dir="ltr" class="w-full rounded-xl border border-white/10 bg-slate-950 px-4 py-3 text-left uppercase outline-none focus:border-emerald-300"><p v-if="editProductForm.errors.sku" class="mt-1 text-sm text-rose-300">{{ editProductForm.errors.sku }}</p></div>
+                        <div><label for="edit-product-category" class="mb-2 block text-sm font-medium">التصنيف</label><select id="edit-product-category" v-model="editProductForm.category_id" class="w-full rounded-xl border border-white/10 bg-slate-950 px-4 py-3 outline-none focus:border-emerald-300"><option value="">بدون تصنيف</option><option v-for="category in editCategoryOptions" :key="category.id" :value="category.id">{{ category.name }}{{ category.isArchived ? ' (مؤرشف حاليًا)' : '' }}</option></select><p v-if="editProductForm.errors.category_id" class="mt-1 text-sm text-rose-300">{{ editProductForm.errors.category_id }}</p></div>
+                        <div><label for="edit-product-description" class="mb-2 block text-sm font-medium">الوصف</label><input id="edit-product-description" v-model="editProductForm.description" maxlength="5000" class="w-full rounded-xl border border-white/10 bg-slate-950 px-4 py-3 outline-none focus:border-emerald-300"><p v-if="editProductForm.errors.description" class="mt-1 text-sm text-rose-300">{{ editProductForm.errors.description }}</p></div>
+                        <div><label for="edit-purchase-price" class="mb-2 block text-sm font-medium">سعر الشراء *</label><input id="edit-purchase-price" v-model="editProductForm.purchase_price" type="number" min="0" step="0.01" required dir="ltr" class="w-full rounded-xl border border-white/10 bg-slate-950 px-4 py-3 text-left outline-none focus:border-emerald-300"><p v-if="editProductForm.errors.purchase_price" class="mt-1 text-sm text-rose-300">{{ editProductForm.errors.purchase_price }}</p></div>
+                        <div><label for="edit-selling-price" class="mb-2 block text-sm font-medium">سعر البيع *</label><input id="edit-selling-price" v-model="editProductForm.selling_price" type="number" min="0" step="0.01" required dir="ltr" class="w-full rounded-xl border border-white/10 bg-slate-950 px-4 py-3 text-left outline-none focus:border-emerald-300"><p v-if="editProductForm.errors.selling_price" class="mt-1 text-sm text-rose-300">{{ editProductForm.errors.selling_price }}</p></div>
+                        <div><label for="edit-low-stock" class="mb-2 block text-sm font-medium">حد تنبيه المخزون *</label><input id="edit-low-stock" v-model="editProductForm.low_stock_threshold" type="number" min="0" step="0.001" required dir="ltr" class="w-full rounded-xl border border-white/10 bg-slate-950 px-4 py-3 text-left outline-none focus:border-emerald-300"><p v-if="editProductForm.errors.low_stock_threshold" class="mt-1 text-sm text-rose-300">{{ editProductForm.errors.low_stock_threshold }}</p></div>
+                        <button type="submit" :disabled="editProductForm.processing" class="sm:col-span-2 rounded-xl bg-emerald-300 px-5 py-3 font-bold text-slate-950 disabled:opacity-60">{{ editProductForm.processing ? 'جارٍ الحفظ...' : 'حفظ التعديلات' }}</button>
+                    </form>
+                </div>
+            </section>
+
+            <section v-if="editingCategory" class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" @click.self="editingCategory = null">
+                <div class="w-full max-w-md rounded-2xl border border-white/10 bg-slate-900 p-5 shadow-2xl sm:p-7" role="dialog" aria-modal="true" aria-labelledby="edit-category-title">
+                    <div class="flex items-start justify-between gap-4"><h2 id="edit-category-title" class="text-xl font-bold">تعديل اسم التصنيف</h2><button type="button" @click="editingCategory = null" class="rounded-lg border border-white/10 px-3 py-2 text-sm">إغلاق</button></div>
+                    <form class="mt-5 space-y-4" @submit.prevent="saveCategoryChanges"><div><label for="edit-category-name" class="mb-2 block text-sm font-medium">اسم التصنيف *</label><input id="edit-category-name" v-model="editCategoryForm.name" required maxlength="120" class="w-full rounded-xl border border-white/10 bg-slate-950 px-4 py-3 outline-none focus:border-emerald-300"><p v-if="editCategoryForm.errors.name" class="mt-1 text-sm text-rose-300">{{ editCategoryForm.errors.name }}</p></div><button type="submit" :disabled="editCategoryForm.processing" class="w-full rounded-xl bg-emerald-300 px-4 py-3 font-bold text-slate-950 disabled:opacity-60">{{ editCategoryForm.processing ? 'جارٍ الحفظ...' : 'حفظ الاسم' }}</button></form>
                 </div>
             </section>
 
