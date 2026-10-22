@@ -4,6 +4,7 @@ namespace Tests\Feature\Inventory;
 
 use App\Models\Branch;
 use App\Models\InventoryBalance;
+use App\Models\InventoryLot;
 use App\Models\Organization;
 use App\Models\Product;
 use App\Models\User;
@@ -42,6 +43,29 @@ class StockAdjustmentTest extends TestCase
             'balance_after' => '12.125',
         ]);
         $this->assertDatabaseCount('inventory_movements', 3);
+    }
+
+    public function test_stock_out_consumes_tracked_lots_and_records_lot_movement(): void
+    {
+        [$owner, $organization, $branch] = $this->createOrganizationFor('Tracked Stock Out');
+        $product = $this->createProduct($organization, $owner, 'STOCK-LOT-001', '5.000');
+        $lot = InventoryLot::query()->create([
+            'organization_id' => $organization->getKey(), 'branch_id' => $branch->getKey(), 'product_id' => $product->getKey(),
+            'created_by' => $owner->getKey(), 'batch_code' => 'STOCK-OUT-LOT',
+            'expires_at' => now('Africa/Cairo')->addDays(20)->toDateString(),
+            'received_at' => now('Africa/Cairo')->toDateString(),
+            'quantity_received' => '3.000', 'quantity_remaining' => '3.000',
+        ]);
+
+        $this->actingAs($owner)->post(route('inventory.adjustments.store'), [
+            'product_id' => $product->getKey(), 'type' => 'stock_out', 'quantity' => '2.000', 'reason' => 'تالف من التشغيلة',
+        ])->assertRedirect(route('products.index'));
+
+        $this->assertSame('3.000', (string) InventoryBalance::query()->where('branch_id', $branch->getKey())->where('product_id', $product->getKey())->value('quantity'));
+        $this->assertSame('1.000', (string) $lot->fresh()->quantity_remaining);
+        $this->assertDatabaseHas('inventory_lot_movements', [
+            'inventory_lot_id' => $lot->getKey(), 'movement_type' => 'stock_out', 'quantity_delta' => '-2.000', 'balance_after' => '1.000',
+        ]);
     }
 
     public function test_stock_out_cannot_make_branch_balance_negative(): void

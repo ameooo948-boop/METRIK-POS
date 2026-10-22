@@ -12,6 +12,8 @@ use App\Models\Customer;
 use App\Models\CustomerAccountTransaction;
 use App\Models\InventoryBalance;
 use App\Models\InventoryLot;
+use App\Models\InventoryLotMovement;
+use App\Models\InventoryLotSaleAllocation;
 use App\Models\InventoryMovement;
 use App\Models\Organization;
 use App\Models\Product;
@@ -371,7 +373,7 @@ class CheckoutSale
                     $unitPrice = DecimalMoney::fromCents($item['unit_price_cents']);
                     $unitCost = DecimalMoney::fromCents($item['unit_cost_cents']);
 
-                    SaleItem::query()->create([
+                    $saleItem = SaleItem::query()->create([
                         'organization_id' => $data->organizationId,
                         'sale_id' => $sale->getKey(),
                         'product_id' => $product->getKey(),
@@ -411,10 +413,31 @@ class CheckoutSale
                     foreach ($item['lot_allocations'] as $allocation) {
                         /** @var InventoryLot $lot */
                         $lot = $allocation['model'];
-                        $lot->quantity_remaining = DecimalQuantity::fromMilli(
-                            DecimalQuantity::toMilli((string) $lot->quantity_remaining) - $allocation['quantity_milli']
-                        );
+                        $lotBalanceMilli = DecimalQuantity::toMilli((string) $lot->quantity_remaining) - $allocation['quantity_milli'];
+                        $lot->quantity_remaining = DecimalQuantity::fromMilli($lotBalanceMilli);
                         $lot->save();
+
+                        InventoryLotSaleAllocation::query()->create([
+                            'organization_id' => $data->organizationId,
+                            'branch_id' => $branch->getKey(),
+                            'sale_item_id' => $saleItem->getKey(),
+                            'inventory_lot_id' => $lot->getKey(),
+                            'quantity_sold' => DecimalQuantity::fromMilli($allocation['quantity_milli']),
+                            'quantity_returned' => '0.000',
+                        ]);
+                        InventoryLotMovement::query()->create([
+                            'organization_id' => $data->organizationId,
+                            'branch_id' => $branch->getKey(),
+                            'product_id' => $product->getKey(),
+                            'inventory_lot_id' => $lot->getKey(),
+                            'created_by' => $data->cashierId,
+                            'movement_type' => 'sale',
+                            'quantity_delta' => DecimalQuantity::fromMilli(-$allocation['quantity_milli']),
+                            'balance_after' => DecimalQuantity::fromMilli($lotBalanceMilli),
+                            'reason' => 'بيع من التشغيلة عبر الفاتورة '.$sale->invoice_number,
+                            'reference_type' => Sale::class,
+                            'reference_id' => $sale->getKey(),
+                        ]);
                     }
 
                     InventoryMovement::query()->create([

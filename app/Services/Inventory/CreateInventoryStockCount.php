@@ -6,6 +6,8 @@ use App\Data\Inventory\CreateInventoryStockCountData;
 use App\Models\Branch;
 use App\Models\InventoryBalance;
 use App\Models\InventoryMovement;
+use App\Models\InventoryLot;
+use App\Models\InventoryLotMovement;
 use App\Models\InventoryStockCount;
 use App\Models\InventoryStockCountItem;
 use App\Models\Product;
@@ -146,7 +148,7 @@ class CreateInventoryStockCount
                     $balance->quantity = $counted;
                     $balance->save();
 
-                    InventoryMovement::query()->create([
+                    $movement = InventoryMovement::query()->create([
                         'organization_id' => $data->organizationId,
                         'branch_id' => $branch->getKey(),
                         'product_id' => $product->getKey(),
@@ -159,6 +161,41 @@ class CreateInventoryStockCount
                         'reference_type' => InventoryStockCount::class,
                         'reference_id' => $stockCount->getKey(),
                     ]);
+
+                    // A negative physical-count variance removes tracked units first so lot
+                    // balances cannot remain higher than the branch's new book quantity.
+                    if ($line['variance_quantity_milli'] < 0) {
+                        $lots = InventoryLot::query()
+                            ->where('organization_id', $data->organizationId)
+                            ->where('branch_id', $branch->getKey())
+                            ->where('product_id', $product->getKey())
+                            ->where('quantity_remaining', '>', 0)
+                            ->orderBy('expires_at')->orderBy('id')->lockForUpdate()->get();
+                        $trackedMilli = $lots->sum(fn (InventoryLot $lot): int => DecimalQuantity::toMilli((string) $lot->quantity_remaining));
+                        if ($trackedMilli > $line['expected_quantity_milli']) {
+                            throw ValidationException::withMessages(['items' => 'رصيد التشغيلات المسجل أكبر من رصيد الدفتر للصنف '.$product->name.'. راجع بيانات التشغيلات قبل اعتماد الجرد.']);
+                        }
+                        $remainingToRemove = min(abs($line['variance_quantity_milli']), $trackedMilli);
+                        foreach ($lots as $lot) {
+                            if ($remainingToRemove <= 0) break;
+                            $lotBeforeMilli = DecimalQuantity::toMilli((string) $lot->quantity_remaining);
+                            $takeMilli = min($remainingToRemove, $lotBeforeMilli);
+                            if ($takeMilli <= 0) continue;
+                            $lotAfterMilli = $lotBeforeMilli - $takeMilli;
+                            $lot->quantity_remaining = DecimalQuantity::fromMilli($lotAfterMilli);
+                            $lot->save();
+                            InventoryLotMovement::query()->create([
+                                'organization_id' => $data->organizationId, 'branch_id' => $branch->getKey(),
+                                'product_id' => $product->getKey(), 'inventory_lot_id' => $lot->getKey(),
+                                'created_by' => $data->createdBy, 'movement_type' => 'count_adjustment',
+                                'quantity_delta' => DecimalQuantity::fromMilli(-$takeMilli),
+                                'balance_after' => DecimalQuantity::fromMilli($lotAfterMilli),
+                                'reason' => 'تسوية جرد رقم '.$stockCount->count_number,
+                                'reference_type' => InventoryStockCount::class, 'reference_id' => $stockCount->getKey(),
+                            ]);
+                            $remainingToRemove -= $takeMilli;
+                        }
+                    }
                 }
 
                 return $stockCount->load(['branch', 'createdBy', 'items']);

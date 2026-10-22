@@ -6,6 +6,8 @@ use App\Models\Branch;
 use App\Models\CashShift;
 use App\Models\InventoryBalance;
 use App\Models\InventoryMovement;
+use App\Models\InventoryLot;
+use App\Models\InventoryLotSaleAllocation;
 use App\Models\Organization;
 use App\Models\Product;
 use App\Models\Sale;
@@ -83,6 +85,45 @@ class PointOfSaleTest extends TestCase
             'cash_shift_id' => $sale->cash_shift_id, 'sale_id' => $sale->getKey(),
             'movement_type' => 'cash_sale', 'amount' => '16.00',
         ]);
+    }
+
+    public function test_checkout_consumes_expiring_lots_first_and_persists_lot_allocations(): void
+    {
+        [$owner, $organization, $branch] = $this->createOrganizationFor('POS Lot FEFO Market');
+        $product = $this->createProduct($organization, $owner, $branch, 'LOT-FEFO-001', 'منتج له تشغيلات', '10.000');
+        $firstLot = InventoryLot::query()->create([
+            'organization_id' => $organization->getKey(), 'branch_id' => $branch->getKey(), 'product_id' => $product->getKey(),
+            'created_by' => $owner->getKey(), 'batch_code' => 'FEFO-NEAR', 'expires_at' => now('Africa/Cairo')->addDays(5)->toDateString(),
+            'received_at' => now('Africa/Cairo')->subDays(5)->toDateString(), 'quantity_received' => '2.000', 'quantity_remaining' => '2.000',
+        ]);
+        $secondLot = InventoryLot::query()->create([
+            'organization_id' => $organization->getKey(), 'branch_id' => $branch->getKey(), 'product_id' => $product->getKey(),
+            'created_by' => $owner->getKey(), 'batch_code' => 'FEFO-FAR', 'expires_at' => now('Africa/Cairo')->addDays(30)->toDateString(),
+            'received_at' => now('Africa/Cairo')->subDays(2)->toDateString(), 'quantity_received' => '3.000', 'quantity_remaining' => '3.000',
+        ]);
+        $this->actingAs($owner)->post(route('pos.shifts.open'), ['opening_amount' => '100.00'])->assertRedirect(route('pos.index'));
+        $uuid = (string) Str::uuid();
+
+        $this->actingAs($owner)->post(route('pos.checkout'), [
+            'client_operation_uuid' => $uuid, 'payment_method' => 'cash',
+            'items' => [['product_id' => $product->getKey(), 'quantity' => '4.000']],
+        ])->assertRedirect();
+
+        $sale = Sale::query()->where('organization_id', $organization->getKey())->where('client_operation_uuid', $uuid)->firstOrFail();
+        $saleItem = $sale->items()->firstOrFail();
+        $this->assertDatabaseHas('inventory_lot_sale_allocations', [
+            'organization_id' => $organization->getKey(), 'branch_id' => $branch->getKey(),
+            'sale_item_id' => $saleItem->getKey(), 'inventory_lot_id' => $firstLot->getKey(),
+            'quantity_sold' => '2.000', 'quantity_returned' => '0.000',
+        ]);
+        $this->assertDatabaseHas('inventory_lot_sale_allocations', [
+            'sale_item_id' => $saleItem->getKey(), 'inventory_lot_id' => $secondLot->getKey(),
+            'quantity_sold' => '2.000', 'quantity_returned' => '0.000',
+        ]);
+        $this->assertSame('0.000', (string) $firstLot->fresh()->quantity_remaining);
+        $this->assertSame('1.000', (string) $secondLot->fresh()->quantity_remaining);
+        $this->assertDatabaseCount('inventory_lot_movements', 2);
+        $this->assertSame('6.000', (string) InventoryBalance::query()->where('branch_id', $branch->getKey())->where('product_id', $product->getKey())->value('quantity'));
     }
 
     public function test_checkout_applies_organization_tax_after_discounts_and_snapshots_the_rate(): void

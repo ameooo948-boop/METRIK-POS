@@ -6,6 +6,8 @@ use App\Data\Inventory\StockAdjustmentData;
 use App\Models\Branch;
 use App\Models\InventoryBalance;
 use App\Models\InventoryMovement;
+use App\Models\InventoryLot;
+use App\Models\InventoryLotMovement;
 use App\Models\Product;
 use App\Support\DecimalQuantity;
 use Illuminate\Support\Facades\DB;
@@ -59,7 +61,7 @@ class AdjustStock
             $balance->quantity = DecimalQuantity::fromMilli($newMilli);
             $balance->save();
 
-            return InventoryMovement::query()->create([
+            $movement = InventoryMovement::query()->create([
                 'organization_id' => $data->organizationId,
                 'branch_id' => $branch->getKey(),
                 'product_id' => $product->getKey(),
@@ -70,6 +72,45 @@ class AdjustStock
                 'source' => 'manual',
                 'reason' => $data->reason,
             ]);
+
+            if ($data->type === 'stock_out' && $requestedMilli > 0) {
+                $lots = InventoryLot::query()
+                    ->where('organization_id', $data->organizationId)
+                    ->where('branch_id', $branch->getKey())
+                    ->where('product_id', $product->getKey())
+                    ->where('quantity_remaining', '>', 0)
+                    ->orderBy('expires_at')->orderBy('id')->lockForUpdate()->get();
+                $trackedMilli = $lots->sum(fn (InventoryLot $lot): int => DecimalQuantity::toMilli((string) $lot->quantity_remaining));
+                if ($trackedMilli > $currentMilli) {
+                    throw ValidationException::withMessages(['quantity' => 'رصيد التشغيلات المسجل أكبر من رصيد المخزون. راجع التشغيلات قبل التسوية.']);
+                }
+                $remainingToRemove = min($requestedMilli, $trackedMilli);
+                foreach ($lots as $lot) {
+                    if ($remainingToRemove <= 0) break;
+                    $lotMilli = DecimalQuantity::toMilli((string) $lot->quantity_remaining);
+                    $takeMilli = min($remainingToRemove, $lotMilli);
+                    if ($takeMilli <= 0) continue;
+                    $lotAfterMilli = $lotMilli - $takeMilli;
+                    $lot->quantity_remaining = DecimalQuantity::fromMilli($lotAfterMilli);
+                    $lot->save();
+                    InventoryLotMovement::query()->create([
+                        'organization_id' => $data->organizationId,
+                        'branch_id' => $branch->getKey(),
+                        'product_id' => $product->getKey(),
+                        'inventory_lot_id' => $lot->getKey(),
+                        'created_by' => $data->createdBy,
+                        'movement_type' => 'stock_out',
+                        'quantity_delta' => DecimalQuantity::fromMilli(-$takeMilli),
+                        'balance_after' => DecimalQuantity::fromMilli($lotAfterMilli),
+                        'reason' => $data->reason,
+                        'reference_type' => InventoryMovement::class,
+                        'reference_id' => $movement->getKey(),
+                    ]);
+                    $remainingToRemove -= $takeMilli;
+                }
+            }
+
+            return $movement;
         });
     }
 }

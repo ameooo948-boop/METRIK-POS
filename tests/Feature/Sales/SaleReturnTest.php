@@ -7,6 +7,7 @@ use App\Models\CashMovement;
 use App\Models\CashShift;
 use App\Models\InventoryBalance;
 use App\Models\InventoryMovement;
+use App\Models\InventoryLot;
 use App\Models\Organization;
 use App\Models\Product;
 use App\Models\Sale;
@@ -82,6 +83,32 @@ class SaleReturnTest extends TestCase
             ->where('summary.taxCollected', '1.12')
             ->where('summary.grossProfit', '3.00')
             ->where('daily.0.taxCollected', '1.12'));
+    }
+
+    public function test_restocked_return_restores_the_original_sale_lot_and_records_traceability(): void
+    {
+        [$owner, $organization, $branch, $product, $sale] = $this->createSale('Return Tracked Lot Market', null, true);
+        $saleItem = $sale->items()->firstOrFail();
+        $lot = InventoryLot::query()->where('organization_id', $organization->getKey())->where('product_id', $product->getKey())->firstOrFail();
+        $this->assertSame('8.000', (string) $lot->quantity_remaining); // 10 opened, 2 sold
+
+        $this->actingAs($owner)->post(route('sales.returns.store', $sale->getKey()), $this->payload($saleItem, '1.000'))
+            ->assertRedirect(route('sales.show', $sale->getKey()));
+
+        $returnItem = SaleReturnItem::query()->where('sale_item_id', $saleItem->getKey())->firstOrFail();
+        $this->assertSame('9.000', (string) $lot->fresh()->quantity_remaining);
+        $this->assertDatabaseHas('inventory_lot_sale_allocations', [
+            'sale_item_id' => $saleItem->getKey(), 'inventory_lot_id' => $lot->getKey(),
+            'quantity_sold' => '2.000', 'quantity_returned' => '1.000',
+        ]);
+        $this->assertDatabaseHas('inventory_lot_return_allocations', [
+            'sale_return_item_id' => $returnItem->getKey(), 'inventory_lot_id' => $lot->getKey(),
+            'quantity' => '1.000', 'restocked' => 1,
+        ]);
+        $this->assertDatabaseHas('inventory_lot_movements', [
+            'inventory_lot_id' => $lot->getKey(), 'movement_type' => 'sale_return',
+            'quantity_delta' => '1.000', 'balance_after' => '9.000',
+        ]);
     }
 
     public function test_same_return_uuid_is_idempotent_and_does_not_restock_or_refund_twice(): void
@@ -168,7 +195,7 @@ class SaleReturnTest extends TestCase
 
     public function test_non_restockable_return_does_not_increase_stock_or_reverse_cost(): void
     {
-        [$owner, $organization, $branch, $product, $sale] = $this->createSale('Return Damaged Item Market');
+        [$owner, $organization, $branch, $product, $sale] = $this->createSale('Return Damaged Item Market', null, true);
         $saleItem = $sale->items()->firstOrFail();
         $payload = $this->payload($saleItem, '1.000');
         $payload['items'][0]['restock'] = false;
@@ -179,6 +206,16 @@ class SaleReturnTest extends TestCase
         $this->assertSame('8.000', (string) $balance->quantity);
         $this->assertSame(0, InventoryMovement::query()->where('reference_type', SaleReturn::class)->count());
         $this->assertDatabaseHas('sale_return_items', ['sale_return_id' => SaleReturn::query()->firstOrFail()->getKey(), 'restock' => 0]);
+        $lot = InventoryLot::query()->where('organization_id', $organization->getKey())->where('product_id', $product->getKey())->firstOrFail();
+        $this->assertSame('8.000', (string) $lot->quantity_remaining);
+        $this->assertDatabaseHas('inventory_lot_sale_allocations', [
+            'sale_item_id' => $saleItem->getKey(), 'inventory_lot_id' => $lot->getKey(),
+            'quantity_sold' => '2.000', 'quantity_returned' => '1.000',
+        ]);
+        $this->assertDatabaseHas('inventory_lot_return_allocations', [
+            'sale_return_item_id' => SaleReturnItem::query()->firstOrFail()->getKey(),
+            'inventory_lot_id' => $lot->getKey(), 'quantity' => '1.000', 'restocked' => 0,
+        ]);
 
         $today = now('Africa/Cairo')->toDateString();
         $this->actingAs($owner)->get(route('reports.index', [
@@ -236,7 +273,7 @@ class SaleReturnTest extends TestCase
     }
 
     /** @return array{0:User,1:Organization,2:Branch,3:Product,4:Sale,5:CashShift} */
-    private function createSale(string $name, ?string $taxRatePercent = null): array
+    private function createSale(string $name, ?string $taxRatePercent = null, bool $trackOpeningStock = false): array
     {
         $owner = User::factory()->create();
         $organization = Organization::query()->create([
@@ -271,6 +308,15 @@ class SaleReturnTest extends TestCase
             'movement_type' => 'opening', 'quantity_delta' => '10.000', 'balance_after' => '10.000',
             'source' => 'test', 'reason' => 'رصيد افتتاحي للاختبار',
         ]);
+        if ($trackOpeningStock) {
+            InventoryLot::query()->create([
+                'organization_id' => $organization->getKey(), 'branch_id' => $branch->getKey(), 'product_id' => $product->getKey(),
+                'created_by' => $owner->getKey(), 'batch_code' => 'RETURN-LOT-001',
+                'expires_at' => now('Africa/Cairo')->addDays(60)->toDateString(),
+                'received_at' => now('Africa/Cairo')->subDays(2)->toDateString(),
+                'quantity_received' => '10.000', 'quantity_remaining' => '10.000',
+            ]);
+        }
 
         $this->actingAs($owner)->post(route('pos.shifts.open'), ['opening_amount' => '50.00'])->assertRedirect(route('pos.index'));
         $this->actingAs($owner)->post(route('pos.checkout'), [

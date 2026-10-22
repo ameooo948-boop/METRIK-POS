@@ -8,6 +8,10 @@ use App\Models\CashMovement;
 use App\Models\CashShift;
 use App\Models\InventoryBalance;
 use App\Models\InventoryMovement;
+use App\Models\InventoryLot;
+use App\Models\InventoryLotMovement;
+use App\Models\InventoryLotReturnAllocation;
+use App\Models\InventoryLotSaleAllocation;
 use App\Models\Sale;
 use App\Models\SaleItem;
 use App\Models\SaleReturn;
@@ -189,7 +193,7 @@ class CreateSaleReturn
                     $quantity = DecimalQuantity::fromMilli($prepared['quantity_milli']);
                     $restock = $prepared['restock'];
 
-                    SaleReturnItem::query()->create([
+                    $returnItem = SaleReturnItem::query()->create([
                         'organization_id' => $data->organizationId,
                         'sale_return_id' => $return->getKey(),
                         'sale_item_id' => $saleItem->getKey(),
@@ -203,6 +207,75 @@ class CreateSaleReturn
                         'tax_amount' => DecimalMoney::fromCents($prepared['tax_refund_cents']),
                         'restock' => $restock,
                     ]);
+
+                    // Map a return to the exact lots originally used for this sale item.
+                    // The allocation's returned quantity is advanced even when the returned
+                    // goods are not restocked, so a later return cannot restore the same units twice.
+                    $lotReturnRemainingMilli = $prepared['base_quantity_milli'];
+                    $lotSaleAllocations = InventoryLotSaleAllocation::query()
+                        ->where('organization_id', $data->organizationId)
+                        ->where('branch_id', $data->branchId)
+                        ->where('sale_item_id', $saleItem->getKey())
+                        ->whereRaw('quantity_sold > quantity_returned')
+                        ->orderBy('id')
+                        ->lockForUpdate()
+                        ->get();
+
+                    foreach ($lotSaleAllocations as $lotAllocation) {
+                        if ($lotReturnRemainingMilli <= 0) {
+                            break;
+                        }
+                        $allocatedMilli = DecimalQuantity::toMilli((string) $lotAllocation->quantity_sold);
+                        $returnedFromLotMilli = DecimalQuantity::toMilli((string) $lotAllocation->quantity_returned);
+                        $availableFromLotMilli = max(0, $allocatedMilli - $returnedFromLotMilli);
+                        $takeMilli = min($lotReturnRemainingMilli, $availableFromLotMilli);
+                        if ($takeMilli <= 0) {
+                            continue;
+                        }
+
+                        $lotAllocation->quantity_returned = DecimalQuantity::fromMilli($returnedFromLotMilli + $takeMilli);
+                        $lotAllocation->save();
+
+                        $lot = InventoryLot::query()
+                            ->where('organization_id', $data->organizationId)
+                            ->where('branch_id', $data->branchId)
+                            ->where('product_id', $saleItem->product_id)
+                            ->whereKey($lotAllocation->inventory_lot_id)
+                            ->lockForUpdate()
+                            ->firstOrFail();
+
+                        $lotBalanceMilli = DecimalQuantity::toMilli((string) $lot->quantity_remaining);
+                        if ($restock) {
+                            $lotBalanceMilli += $takeMilli;
+                            $lot->quantity_remaining = DecimalQuantity::fromMilli($lotBalanceMilli);
+                            $lot->save();
+
+                            InventoryLotMovement::query()->create([
+                                'organization_id' => $data->organizationId,
+                                'branch_id' => $data->branchId,
+                                'product_id' => $saleItem->product_id,
+                                'inventory_lot_id' => $lot->getKey(),
+                                'created_by' => $data->cashierId,
+                                'movement_type' => 'sale_return',
+                                'quantity_delta' => DecimalQuantity::fromMilli($takeMilli),
+                                'balance_after' => DecimalQuantity::fromMilli($lotBalanceMilli),
+                                'reason' => 'إعادة إلى التشغيلة من المرتجع '.$return->return_number,
+                                'reference_type' => SaleReturn::class,
+                                'reference_id' => $return->getKey(),
+                            ]);
+                        }
+
+                        InventoryLotReturnAllocation::query()->create([
+                            'organization_id' => $data->organizationId,
+                            'branch_id' => $data->branchId,
+                            'sale_return_item_id' => $returnItem->getKey(),
+                            'inventory_lot_sale_allocation_id' => $lotAllocation->getKey(),
+                            'inventory_lot_id' => $lot->getKey(),
+                            'quantity' => DecimalQuantity::fromMilli($takeMilli),
+                            'restocked' => $restock,
+                        ]);
+                        $lotReturnRemainingMilli -= $takeMilli;
+                    }
 
                     if (! $restock) {
                         continue;

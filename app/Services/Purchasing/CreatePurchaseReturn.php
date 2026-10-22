@@ -5,6 +5,8 @@ namespace App\Services\Purchasing;
 use App\Data\Purchasing\CreatePurchaseReturnData;
 use App\Models\InventoryBalance;
 use App\Models\InventoryMovement;
+use App\Models\InventoryLot;
+use App\Models\InventoryLotMovement;
 use App\Models\PurchaseInvoice;
 use App\Models\PurchaseInvoiceItem;
 use App\Models\PurchaseReturn;
@@ -198,6 +200,37 @@ class CreatePurchaseReturn
                     'reference_type' => PurchaseReturn::class,
                     'reference_id' => $return->getKey(),
                 ]);
+
+                $lots = InventoryLot::query()
+                    ->where('organization_id', $data->organizationId)
+                    ->where('branch_id', $data->branchId)
+                    ->where('product_id', $item->product_id)
+                    ->where('quantity_remaining', '>', 0)
+                    ->orderBy('expires_at')->orderBy('id')->lockForUpdate()->get();
+                $trackedMilli = $lots->sum(fn (InventoryLot $lot): int => DecimalQuantity::toMilli((string) $lot->quantity_remaining));
+                if ($trackedMilli > $prepared['current_balance_milli']) {
+                    throw ValidationException::withMessages(['items' => 'رصيد التشغيلات المسجل أكبر من رصيد المخزون للصنف '.$item->product_name_snapshot.'. راجع التشغيلات قبل المرتجع للمورد.']);
+                }
+                $remainingToRemove = min($baseQuantityMilli, $trackedMilli);
+                foreach ($lots as $lot) {
+                    if ($remainingToRemove <= 0) break;
+                    $lotBeforeMilli = DecimalQuantity::toMilli((string) $lot->quantity_remaining);
+                    $takeMilli = min($remainingToRemove, $lotBeforeMilli);
+                    if ($takeMilli <= 0) continue;
+                    $lotAfterMilli = $lotBeforeMilli - $takeMilli;
+                    $lot->quantity_remaining = DecimalQuantity::fromMilli($lotAfterMilli);
+                    $lot->save();
+                    InventoryLotMovement::query()->create([
+                        'organization_id' => $data->organizationId, 'branch_id' => $data->branchId,
+                        'product_id' => $item->product_id, 'inventory_lot_id' => $lot->getKey(),
+                        'created_by' => $data->createdBy, 'movement_type' => 'purchase_return',
+                        'quantity_delta' => DecimalQuantity::fromMilli(-$takeMilli),
+                        'balance_after' => DecimalQuantity::fromMilli($lotAfterMilli),
+                        'reason' => 'إخراج تشغيلة مع المرتجع للمورد '.$return->return_number,
+                        'reference_type' => PurchaseReturn::class, 'reference_id' => $return->getKey(),
+                    ]);
+                    $remainingToRemove -= $takeMilli;
+                }
             }
 
             $totalCents = DecimalMoney::toCents((string) $return->total);

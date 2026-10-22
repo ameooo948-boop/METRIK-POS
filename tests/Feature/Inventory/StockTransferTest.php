@@ -5,6 +5,7 @@ namespace Tests\Feature\Inventory;
 use App\Models\Branch;
 use App\Models\InventoryBalance;
 use App\Models\InventoryMovement;
+use App\Models\InventoryLot;
 use App\Models\Organization;
 use App\Models\Product;
 use App\Models\ProductUnitConversion;
@@ -50,6 +51,42 @@ class StockTransferTest extends TestCase
             'movement_type' => 'transfer_in', 'quantity_delta' => '3.125', 'balance_after' => '3.125',
         ]);
         $this->assertDatabaseCount('stock_transfers', 1);
+    }
+
+    public function test_transfer_preserves_batch_code_and_expiry_for_tracked_stock(): void
+    {
+        [$owner, $organization, $source] = $this->createOrganizationFor('Tracked Stock Transfer');
+        $destination = $this->createBranch($organization, 'فرع تشغيلات', 'LOT-DST');
+        $product = $this->createProduct($organization, $owner, $source, 'TRANSFER-LOT-001', 'منتج تشغيلات', '10.000');
+        $expiresAt = now('Africa/Cairo')->addDays(45)->toDateString();
+        $sourceLot = InventoryLot::query()->create([
+            'organization_id' => $organization->getKey(), 'branch_id' => $source->getKey(), 'product_id' => $product->getKey(),
+            'created_by' => $owner->getKey(), 'batch_code' => 'SHARED-BATCH-42',
+            'manufactured_at' => now('Africa/Cairo')->subDays(20)->toDateString(), 'expires_at' => $expiresAt,
+            'received_at' => now('Africa/Cairo')->subDays(10)->toDateString(),
+            'quantity_received' => '4.000', 'quantity_remaining' => '4.000',
+        ]);
+
+        $this->actingAs($owner)->post(route('inventory.transfers.store'), [
+            'destination_branch_id' => $destination->getKey(),
+            'client_operation_uuid' => (string) Str::uuid(),
+            'notes' => 'تحويل تشغيلات',
+            'items' => [['product_id' => $product->getKey(), 'quantity' => '3.000']],
+        ])->assertRedirect(route('inventory.transfers.index'));
+
+        $this->assertSame('1.000', (string) $sourceLot->fresh()->quantity_remaining);
+        $destinationLot = InventoryLot::query()->where('branch_id', $destination->getKey())->where('product_id', $product->getKey())->firstOrFail();
+        $this->assertSame('SHARED-BATCH-42', $destinationLot->batch_code);
+        $this->assertSame($expiresAt, $destinationLot->expires_at->toDateString());
+        $this->assertSame('3.000', (string) $destinationLot->quantity_remaining);
+        $this->assertDatabaseHas('inventory_lot_movements', [
+            'inventory_lot_id' => $sourceLot->getKey(), 'movement_type' => 'transfer_out',
+            'quantity_delta' => '-3.000', 'balance_after' => '1.000',
+        ]);
+        $this->assertDatabaseHas('inventory_lot_movements', [
+            'inventory_lot_id' => $destinationLot->getKey(), 'movement_type' => 'transfer_in',
+            'quantity_delta' => '3.000', 'balance_after' => '3.000',
+        ]);
     }
 
     public function test_replaying_the_same_transfer_uuid_does_not_move_stock_twice(): void

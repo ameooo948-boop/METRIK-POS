@@ -122,6 +122,7 @@ Route::middleware(['auth', SecurityHeaders::class])->group(function () {
         Route::get('/inventory/low-stock', [LowStockController::class, 'index'])->name('inventory.low-stock.index');
         Route::get('/inventory/valuation/export', [InventoryValuationController::class, 'export'])->name('inventory.valuation.export');
         Route::get('/inventory/valuation', [InventoryValuationController::class, 'index'])->name('inventory.valuation.index');
+        Route::get('/inventory/lots/{lotId}/movements', [InventoryLotController::class, 'movements'])->whereNumber('lotId')->name('inventory.lots.movements');
         Route::get('/inventory/lots', [InventoryLotController::class, 'index'])->name('inventory.lots.index');
         Route::post('/inventory/lots', [InventoryLotController::class, 'store'])->middleware('throttle:30,1,inventory-lots-store')->name('inventory.lots.store');
         Route::patch('/inventory/low-stock/{productId}/threshold', [LowStockController::class, 'updateThreshold'])->whereNumber('productId')->middleware('throttle:60,1,inventory-reorder-threshold-update')->name('inventory.low-stock.threshold.update');

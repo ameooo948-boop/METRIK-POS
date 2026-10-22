@@ -5,6 +5,7 @@ namespace Tests\Feature\Inventory;
 use App\Models\Branch;
 use App\Models\InventoryBalance;
 use App\Models\InventoryLot;
+use App\Models\InventoryLotMovement;
 use App\Models\Organization;
 use App\Models\Product;
 use App\Models\Unit;
@@ -32,6 +33,10 @@ class InventoryLotsTest extends TestCase
             'batch_code' => 'BATCH-001', 'quantity_received' => '5.000', 'quantity_remaining' => '5.000',
         ]);
         $this->assertDatabaseHas('inventory_balances', ['branch_id' => $branch->getKey(), 'product_id' => $product->getKey(), 'quantity' => '12.000']);
+        $this->assertDatabaseHas('inventory_lot_movements', [
+            'organization_id' => $organization->getKey(), 'branch_id' => $branch->getKey(),
+            'movement_type' => 'lot_registration', 'quantity_delta' => '5.000', 'balance_after' => '5.000',
+        ]);
     }
 
     public function test_lot_quantity_cannot_exceed_untracked_branch_stock(): void
@@ -60,6 +65,27 @@ class InventoryLotsTest extends TestCase
             ->assertOk()->assertInertia(fn (Assert $page) => $page
                 ->component('Inventory/Lots')->where('summary.expiredLots', 1)
                 ->has('lots.data', 1)->where('lots.data.0.status', 'expired'));
+    }
+
+    public function test_owner_can_view_lot_movement_history(): void
+    {
+        [$owner, $organization, $branch, $product] = $this->makeProduct('Lots History', '5.000');
+        $lot = InventoryLot::query()->create([
+            'organization_id' => $organization->getKey(), 'branch_id' => $branch->getKey(), 'product_id' => $product->getKey(),
+            'created_by' => $owner->getKey(), 'batch_code' => 'HISTORY-BATCH',
+            'expires_at' => now('Africa/Cairo')->addDays(30)->toDateString(), 'received_at' => now('Africa/Cairo')->toDateString(),
+            'quantity_received' => '3.000', 'quantity_remaining' => '2.000',
+        ]);
+        InventoryLotMovement::query()->create([
+            'organization_id' => $organization->getKey(), 'branch_id' => $branch->getKey(), 'product_id' => $product->getKey(),
+            'inventory_lot_id' => $lot->getKey(), 'created_by' => $owner->getKey(), 'movement_type' => 'stock_out',
+            'quantity_delta' => '-1.000', 'balance_after' => '2.000', 'reason' => 'حركة اختبار',
+        ]);
+
+        $this->actingAs($owner)->get(route('inventory.lots.movements', $lot->getKey()))
+            ->assertOk()->assertInertia(fn (Assert $page) => $page
+                ->component('Inventory/LotMovements')->where('lot.batchCode', 'HISTORY-BATCH')
+                ->where('movements.data.0.typeLabel', 'تسوية صرف')->where('movements.total', 1));
     }
 
     public function test_cashier_cannot_manage_expiry_lots(): void

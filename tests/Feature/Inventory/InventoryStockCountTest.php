@@ -5,6 +5,7 @@ namespace Tests\Feature\Inventory;
 use App\Models\Branch;
 use App\Models\InventoryBalance;
 use App\Models\InventoryMovement;
+use App\Models\InventoryLot;
 use App\Models\InventoryStockCount;
 use App\Models\Organization;
 use App\Models\Product;
@@ -64,6 +65,32 @@ class InventoryStockCountTest extends TestCase
             'source' => 'stock_count',
         ]);
         $this->assertDatabaseCount('inventory_stock_counts', 1);
+    }
+
+    public function test_negative_stock_count_variance_reduces_tracked_lots(): void
+    {
+        [$owner, $organization, $branch] = $this->createOrganizationFor('Tracked Count Adjustment');
+        $product = $this->createProduct($organization, $owner, $branch, 'COUNT-LOT-001', 'منتج تتبع الجرد', '5.000');
+        $lot = InventoryLot::query()->create([
+            'organization_id' => $organization->getKey(), 'branch_id' => $branch->getKey(), 'product_id' => $product->getKey(),
+            'created_by' => $owner->getKey(), 'batch_code' => 'COUNT-LOT-001',
+            'expires_at' => now('Africa/Cairo')->addDays(20)->toDateString(),
+            'received_at' => now('Africa/Cairo')->toDateString(),
+            'quantity_received' => '3.000', 'quantity_remaining' => '3.000',
+        ]);
+
+        $this->actingAs($owner)->post(route('inventory.stock-counts.store'), [
+            'client_operation_uuid' => (string) Str::uuid(), 'notes' => 'جرد تجريبي',
+            'items' => [[
+                'product_id' => $product->getKey(), 'expected_quantity' => '5.000', 'counted_quantity' => '3.000',
+            ]],
+        ])->assertRedirect(route('inventory.stock-counts.index'));
+
+        $this->assertSame('1.000', (string) $lot->fresh()->quantity_remaining);
+        $this->assertDatabaseHas('inventory_lot_movements', [
+            'inventory_lot_id' => $lot->getKey(), 'movement_type' => 'count_adjustment',
+            'quantity_delta' => '-2.000', 'balance_after' => '1.000',
+        ]);
     }
 
     public function test_same_count_uuid_is_idempotent_and_does_not_apply_variance_twice(): void

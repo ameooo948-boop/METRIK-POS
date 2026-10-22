@@ -5,6 +5,7 @@ namespace Tests\Feature\Purchasing;
 use App\Models\CashShift;
 use App\Models\InventoryBalance;
 use App\Models\InventoryMovement;
+use App\Models\InventoryLot;
 use App\Models\Organization;
 use App\Models\Product;
 use App\Models\PurchaseInvoice;
@@ -58,6 +59,31 @@ class SupplierSettlementAndPurchaseReturnTest extends TestCase
             ->assertRedirect(route('purchase-returns.index'));
         $this->assertDatabaseCount('purchase_returns', 1);
         $this->assertDatabaseHas('inventory_balances', ['branch_id' => $branch->getKey(), 'product_id' => $product->getKey(), 'quantity' => '6.000']);
+    }
+
+    public function test_purchase_return_reduces_tracked_lots_and_writes_lot_history(): void
+    {
+        [$owner, $organization, $branch, $supplier, $product] = $this->fixture('Tracked Vendor Return', '5.000');
+        $invoice = $this->receiveInvoice($owner, $supplier, $product, '2.000', '10.00');
+        $lot = InventoryLot::query()->create([
+            'organization_id' => $organization->getKey(), 'branch_id' => $branch->getKey(), 'product_id' => $product->getKey(),
+            'created_by' => $owner->getKey(), 'batch_code' => 'VENDOR-RETURN-LOT',
+            'expires_at' => now('Africa/Cairo')->addDays(30)->toDateString(),
+            'received_at' => now('Africa/Cairo')->subDays(3)->toDateString(),
+            'quantity_received' => '4.000', 'quantity_remaining' => '4.000',
+        ]);
+        $item = $invoice->items()->firstOrFail();
+
+        $this->actingAs($owner)->post(route('purchase-invoices.returns.store', $invoice->getKey()), [
+            'client_operation_uuid' => (string) Str::uuid(), 'reason' => 'مرتجع مورد من المخزون المتتبع',
+            'items' => [['purchase_invoice_item_id' => $item->getKey(), 'quantity' => '1.000']],
+        ])->assertRedirect(route('purchase-returns.index'));
+
+        $this->assertSame('3.000', (string) $lot->fresh()->quantity_remaining);
+        $this->assertDatabaseHas('inventory_lot_movements', [
+            'inventory_lot_id' => $lot->getKey(), 'movement_type' => 'purchase_return',
+            'quantity_delta' => '-1.000', 'balance_after' => '3.000',
+        ]);
     }
 
     public function test_purchase_return_cannot_exceed_remaining_invoice_quantity_or_on_hand_stock(): void

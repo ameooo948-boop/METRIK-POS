@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Inventory;
 use App\Http\Controllers\Controller;
 use App\Models\InventoryBalance;
 use App\Models\InventoryLot;
+use App\Models\InventoryLotMovement;
 use App\Models\Organization;
 use App\Models\Product;
 use App\Support\DecimalQuantity;
@@ -34,8 +35,10 @@ class InventoryLotController extends Controller
         if (! in_array($status, ['all', 'expired', 'soon', 'healthy', 'depleted'], true)) {
             $status = 'all';
         }
-        $today = now()->toDateString();
-        $soonDate = now()->addDays(30)->toDateString();
+        $timezone = (string) ($organization->timezone ?: config('app.timezone', 'UTC'));
+        $todayMoment = now($timezone)->startOfDay();
+        $today = $todayMoment->toDateString();
+        $soonDate = $todayMoment->copy()->addDays(30)->toDateString();
 
         $lotsQuery = InventoryLot::query()
             ->with(['product:id,organization_id,sku,name'])
@@ -52,7 +55,7 @@ class InventoryLotController extends Controller
             ->orderBy('expires_at')->orderBy('id');
 
         $lots = $lotsQuery->paginate(20)->withQueryString();
-        $lots->through(static function (InventoryLot $lot) use ($today, $soonDate): array {
+        $lots->through(static function (InventoryLot $lot) use ($today, $soonDate, $timezone, $todayMoment): array {
             $expires = $lot->expires_at->toDateString();
             $remaining = DecimalQuantity::toMilli((string) $lot->quantity_remaining);
             $lotStatus = $remaining <= 0 ? 'depleted' : ($expires < $today ? 'expired' : ($expires <= $soonDate ? 'soon' : 'healthy'));
@@ -63,7 +66,7 @@ class InventoryLotController extends Controller
                 'batchCode' => (string) $lot->batch_code, 'manufacturedAt' => $lot->manufactured_at?->toDateString(),
                 'expiresAt' => $expires, 'receivedAt' => $lot->received_at->toDateString(),
                 'quantityReceived' => (string) $lot->quantity_received, 'quantityRemaining' => (string) $lot->quantity_remaining,
-                'status' => $lotStatus, 'daysUntilExpiry' => (int) now()->startOfDay()->diffInDays($lot->expires_at, false),
+                'status' => $lotStatus, 'daysUntilExpiry' => (int) $todayMoment->diffInDays(\Illuminate\Support\Carbon::parse($expires, $timezone)->startOfDay(), false),
             ];
         });
 
@@ -85,6 +88,72 @@ class InventoryLotController extends Controller
         ]);
     }
 
+    public function movements(Request $request, int $lotId): Response|RedirectResponse
+    {
+        /** @var Organization $organization */
+        $organization = $request->attributes->get('currentOrganization');
+        $this->authorize('manageInventory', $organization);
+        $branch = $request->attributes->get('currentBranch');
+        if ($branch === null) {
+            return redirect()->route('branches.index')->with('error', 'لا يوجد فرع متاح لهذا الحساب.');
+        }
+
+        $organizationId = (int) $organization->getKey();
+        $branchId = (int) $branch->getKey();
+        $timezone = (string) ($organization->timezone ?: config('app.timezone', 'UTC'));
+        $lot = InventoryLot::query()
+            ->with('product:id,organization_id,sku,name')
+            ->where('organization_id', $organizationId)
+            ->where('branch_id', $branchId)
+            ->whereKey($lotId)
+            ->firstOrFail();
+
+        $movements = InventoryLotMovement::query()
+            ->with('createdBy:id,name')
+            ->where('organization_id', $organizationId)
+            ->where('branch_id', $branchId)
+            ->where('inventory_lot_id', $lot->getKey())
+            ->orderByDesc('id')
+            ->paginate(30)
+            ->withQueryString();
+        $movements->through(static fn (InventoryLotMovement $movement): array => [
+            'id' => (int) $movement->getKey(),
+            'type' => (string) $movement->movement_type,
+            'typeLabel' => match ($movement->movement_type) {
+                'opening_balance' => 'رصيد افتتاحي عند الترحيل', 'lot_registration' => 'تسجيل تشغيلة',
+                'sale' => 'بيع', 'sale_return' => 'مرتجع بيع', 'transfer_out' => 'تحويل صادر',
+                'transfer_in' => 'تحويل وارد', 'stock_out' => 'تسوية صرف', 'count_adjustment' => 'تسوية جرد', 'purchase_return' => 'مرتجع للمورد',
+                default => (string) $movement->movement_type,
+            },
+            'quantityDelta' => (string) $movement->quantity_delta,
+            'balanceAfter' => (string) $movement->balance_after,
+            'reason' => (string) ($movement->reason ?? ''),
+            'referenceType' => $movement->reference_type ? class_basename($movement->reference_type) : null,
+            'referenceId' => $movement->reference_id ? (int) $movement->reference_id : null,
+            'createdBy' => (string) ($movement->createdBy?->name ?? 'النظام'),
+            'occurredAt' => $movement->created_at?->timezone($timezone)->format('Y-m-d H:i:s'),
+        ]);
+
+        $today = now($timezone)->toDateString();
+        $soonDate = now($timezone)->addDays(30)->toDateString();
+        $expiresAt = $lot->expires_at->toDateString();
+        $remainingMilli = DecimalQuantity::toMilli((string) $lot->quantity_remaining);
+        $status = $remainingMilli <= 0 ? 'depleted' : ($expiresAt < $today ? 'expired' : ($expiresAt <= $soonDate ? 'soon' : 'healthy'));
+
+        return Inertia::render('Inventory/LotMovements', [
+            'organization' => $organization->only(['id', 'name', 'currency']),
+            'currentBranch' => $branch->only(['id', 'name', 'code']),
+            'lot' => [
+                'id' => (int) $lot->getKey(), 'productName' => (string) ($lot->product?->name ?? '—'),
+                'sku' => (string) ($lot->product?->sku ?? '—'), 'batchCode' => (string) $lot->batch_code,
+                'manufacturedAt' => $lot->manufactured_at?->toDateString(), 'expiresAt' => $expiresAt,
+                'receivedAt' => $lot->received_at->toDateString(), 'quantityReceived' => (string) $lot->quantity_received,
+                'quantityRemaining' => (string) $lot->quantity_remaining, 'status' => $status,
+            ],
+            'movements' => $movements,
+        ]);
+    }
+
     public function store(Request $request): RedirectResponse
     {
         /** @var Organization $organization */
@@ -95,10 +164,12 @@ class InventoryLotController extends Controller
             return redirect()->route('branches.index')->with('error', 'لا يوجد فرع متاح لهذا الحساب.');
         }
 
+        $timezone = (string) ($organization->timezone ?: config('app.timezone', 'UTC'));
+        $today = now($timezone)->toDateString();
         $validated = $request->validate([
             'product_id' => ['required', 'integer', 'min:1'], 'batch_code' => ['required', 'string', 'max:80'],
-            'manufactured_at' => ['nullable', 'date', 'before_or_equal:today'], 'expires_at' => ['required', 'date'],
-            'received_at' => ['required', 'date', 'before_or_equal:today'], 'quantity' => ['required', 'numeric', 'gt:0', 'decimal:0,3', 'max:999999999'],
+            'manufactured_at' => ['nullable', 'date', 'before_or_equal:'.$today, 'before_or_equal:expires_at'], 'expires_at' => ['required', 'date'],
+            'received_at' => ['required', 'date', 'before_or_equal:'.$today], 'quantity' => ['required', 'numeric', 'gt:0', 'decimal:0,3', 'max:999999999'],
         ]);
 
         $organizationId = (int) $organization->getKey();
@@ -121,12 +192,19 @@ class InventoryLotController extends Controller
                 throw ValidationException::withMessages(['quantity' => 'الكمية أكبر من الرصيد غير الموزع على تشغيلات. المتاح للتسجيل: '.DecimalQuantity::fromMilli($untrackedMilli)]);
             }
 
-            InventoryLot::query()->create([
+            $lot = InventoryLot::query()->create([
                 'organization_id' => $organizationId, 'branch_id' => $branchId, 'product_id' => $product->getKey(),
                 'created_by' => (int) $request->user()->getKey(), 'batch_code' => trim($validated['batch_code']),
                 'manufactured_at' => $validated['manufactured_at'] ?? null, 'expires_at' => $validated['expires_at'],
                 'received_at' => $validated['received_at'], 'quantity_received' => $validated['quantity'],
                 'quantity_remaining' => $validated['quantity'],
+            ]);
+            InventoryLotMovement::query()->create([
+                'organization_id' => $organizationId, 'branch_id' => $branchId, 'product_id' => $product->getKey(),
+                'inventory_lot_id' => $lot->getKey(), 'created_by' => (int) $request->user()->getKey(),
+                'movement_type' => 'lot_registration', 'quantity_delta' => $validated['quantity'],
+                'balance_after' => $validated['quantity'],
+                'reason' => 'توزيع كمية من الرصيد غير المتتبع على التشغيلة دون تغيير إجمالي مخزون الفرع',
             ]);
         });
 

@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class InventoryLot extends Model
 {
@@ -27,4 +28,7 @@ class InventoryLot extends Model
     public function branch(): BelongsTo { return $this->belongsTo(Branch::class); }
     public function product(): BelongsTo { return $this->belongsTo(Product::class); }
     public function creator(): BelongsTo { return $this->belongsTo(User::class, 'created_by'); }
+    public function saleAllocations(): HasMany { return $this->hasMany(InventoryLotSaleAllocation::class); }
+    public function returnAllocations(): HasMany { return $this->hasMany(InventoryLotReturnAllocation::class); }
+    public function movements(): HasMany { return $this->hasMany(InventoryLotMovement::class); }
 }

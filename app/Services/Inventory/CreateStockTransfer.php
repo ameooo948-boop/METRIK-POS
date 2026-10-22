@@ -6,6 +6,8 @@ use App\Data\Inventory\CreateStockTransferData;
 use App\Models\Branch;
 use App\Models\InventoryBalance;
 use App\Models\InventoryMovement;
+use App\Models\InventoryLot;
+use App\Models\InventoryLotMovement;
 use App\Models\Product;
 use App\Models\StockTransfer;
 use App\Models\StockTransferItem;
@@ -109,11 +111,47 @@ class CreateStockTransfer
 
                     $sourceBefore = DecimalQuantity::toMilli((string) $sourceBalance->quantity);
                     $destinationBefore = DecimalQuantity::toMilli((string) $destinationBalance->quantity);
+                    $destinationTrackedMilli = DecimalQuantity::toMilli((string) InventoryLot::query()
+                        ->where('organization_id', $data->organizationId)
+                        ->where('branch_id', $data->destinationBranchId)
+                        ->where('product_id', $product->getKey())
+                        ->where('quantity_remaining', '>', 0)
+                        ->lockForUpdate()
+                        ->sum('quantity_remaining'));
+                    if ($destinationTrackedMilli > $destinationBefore) {
+                        throw ValidationException::withMessages([
+                            'items' => 'رصيد التشغيلات المسجل في الفرع المستلم أكبر من رصيد الدفتر للصنف «'.$product->name.'». راجع التشغيلات قبل التحويل.',
+                        ]);
+                    }
                     if ($quantityMilli > $sourceBefore) {
                         throw ValidationException::withMessages([
                             'items' => 'الرصيد غير كافٍ في الفرع الحالي للصنف «'.$product->name.'». المتاح: '
                                 .DecimalQuantity::fromMilli($sourceBefore).'.',
                         ]);
+                    }
+
+                    $sourceLots = InventoryLot::query()
+                        ->where('organization_id', $data->organizationId)
+                        ->where('branch_id', $data->sourceBranchId)
+                        ->where('product_id', $product->getKey())
+                        ->where('quantity_remaining', '>', 0)
+                        ->orderBy('expires_at')->orderBy('id')->lockForUpdate()->get();
+                    $trackedMilli = $sourceLots->sum(fn (InventoryLot $lot): int => DecimalQuantity::toMilli((string) $lot->quantity_remaining));
+                    if ($trackedMilli > $sourceBefore) {
+                        throw ValidationException::withMessages([
+                            'items' => 'رصيد التشغيلات المسجل للصنف «'.$product->name.'» أكبر من رصيد الفرع. راجع التشغيلات قبل التحويل.',
+                        ]);
+                    }
+                    $remainingTrackedToTransfer = min($quantityMilli, $trackedMilli);
+                    $lotTransferLines = [];
+                    foreach ($sourceLots as $sourceLot) {
+                        if ($remainingTrackedToTransfer <= 0) break;
+                        $lotMilli = DecimalQuantity::toMilli((string) $sourceLot->quantity_remaining);
+                        $takeMilli = min($remainingTrackedToTransfer, $lotMilli);
+                        if ($takeMilli > 0) {
+                            $lotTransferLines[] = ['lot' => $sourceLot, 'quantity_milli' => $takeMilli];
+                            $remainingTrackedToTransfer -= $takeMilli;
+                        }
                     }
 
                     $prepared[] = [
@@ -123,6 +161,7 @@ class CreateStockTransfer
                         'destination_balance' => $destinationBalance,
                         'source_after_milli' => $sourceBefore - $quantityMilli,
                         'destination_after_milli' => $destinationBefore + $quantityMilli,
+                        'lot_transfer_lines' => $lotTransferLines,
                     ];
                 }
 
@@ -194,6 +233,66 @@ class CreateStockTransfer
                         'reference_type' => StockTransfer::class,
                         'reference_id' => $transfer->getKey(),
                     ]);
+
+                    foreach ($line['lot_transfer_lines'] as $lotLine) {
+                        /** @var InventoryLot $sourceLot */
+                        $sourceLot = $lotLine['lot'];
+                        $takeMilli = $lotLine['quantity_milli'];
+                        $sourceLotAfterMilli = DecimalQuantity::toMilli((string) $sourceLot->quantity_remaining) - $takeMilli;
+                        $sourceLot->quantity_remaining = DecimalQuantity::fromMilli($sourceLotAfterMilli);
+                        $sourceLot->save();
+                        InventoryLotMovement::query()->create([
+                            'organization_id' => $data->organizationId, 'branch_id' => $source->getKey(),
+                            'product_id' => $product->getKey(), 'inventory_lot_id' => $sourceLot->getKey(),
+                            'created_by' => $data->createdBy, 'movement_type' => 'transfer_out',
+                            'quantity_delta' => DecimalQuantity::fromMilli(-$takeMilli),
+                            'balance_after' => DecimalQuantity::fromMilli($sourceLotAfterMilli),
+                            'reason' => 'تحويل تشغيلة إلى '.$destination->name.' رقم '.$transfer->transfer_number,
+                            'reference_type' => StockTransfer::class, 'reference_id' => $transfer->getKey(),
+                        ]);
+
+                        $destinationLot = InventoryLot::query()
+                            ->where('organization_id', $data->organizationId)
+                            ->where('branch_id', $destination->getKey())
+                            ->where('product_id', $product->getKey())
+                            ->where('batch_code', $sourceLot->batch_code)
+                            ->lockForUpdate()->first();
+                        if ($destinationLot && (
+                            $destinationLot->expires_at->toDateString() !== $sourceLot->expires_at->toDateString()
+                            || $destinationLot->manufactured_at?->toDateString() !== $sourceLot->manufactured_at?->toDateString()
+                        )) {
+                            throw ValidationException::withMessages([
+                                'items' => 'رقم التشغيلة «'.$sourceLot->batch_code.'» موجود في الفرع المستلم بتواريخ مختلفة. راجع بيانات التشغيلة قبل التحويل.',
+                            ]);
+                        }
+                        $destinationLotBeforeMilli = $destinationLot ? DecimalQuantity::toMilli((string) $destinationLot->quantity_remaining) : 0;
+                        $destinationLotReceivedMilli = $destinationLot ? DecimalQuantity::toMilli((string) $destinationLot->quantity_received) : 0;
+                        if (! $destinationLot) {
+                            $destinationLot = InventoryLot::query()->create([
+                                'organization_id' => $data->organizationId, 'branch_id' => $destination->getKey(),
+                                'product_id' => $product->getKey(), 'created_by' => $data->createdBy,
+                                'batch_code' => $sourceLot->batch_code, 'manufactured_at' => $sourceLot->manufactured_at?->toDateString(),
+                                'expires_at' => $sourceLot->expires_at->toDateString(), 'received_at' => now($source->organization?->timezone ?: config('app.timezone'))->toDateString(),
+                                'quantity_received' => DecimalQuantity::fromMilli($takeMilli),
+                                'quantity_remaining' => DecimalQuantity::fromMilli($takeMilli),
+                            ]);
+                        } else {
+                            $destinationLotAfterMilli = $destinationLotBeforeMilli + $takeMilli;
+                            $destinationLot->quantity_received = DecimalQuantity::fromMilli($destinationLotReceivedMilli + $takeMilli);
+                            $destinationLot->quantity_remaining = DecimalQuantity::fromMilli($destinationLotAfterMilli);
+                            $destinationLot->save();
+                        }
+                        $destinationLotAfterMilli = DecimalQuantity::toMilli((string) $destinationLot->quantity_remaining);
+                        InventoryLotMovement::query()->create([
+                            'organization_id' => $data->organizationId, 'branch_id' => $destination->getKey(),
+                            'product_id' => $product->getKey(), 'inventory_lot_id' => $destinationLot->getKey(),
+                            'created_by' => $data->createdBy, 'movement_type' => 'transfer_in',
+                            'quantity_delta' => DecimalQuantity::fromMilli($takeMilli),
+                            'balance_after' => DecimalQuantity::fromMilli($destinationLotAfterMilli),
+                            'reason' => 'استلام تشغيلة من '.$source->name.' رقم '.$transfer->transfer_number,
+                            'reference_type' => StockTransfer::class, 'reference_id' => $transfer->getKey(),
+                        ]);
+                    }
                 }
 
                 return $transfer->load(['sourceBranch', 'destinationBranch', 'items']);
