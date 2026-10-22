@@ -699,6 +699,7 @@ onBeforeUnmount(() => {
                     <Link href="/dashboard" class="rounded-xl border border-white/10 px-3 py-2 hover:border-emerald-300/50">لوحة التحكم</Link>
                     <Link href="/products" class="rounded-xl border border-white/10 px-3 py-2 hover:border-emerald-300/50">المنتجات</Link>
                     <Link v-if="canViewSales" href="/sales" class="rounded-xl border border-white/10 px-3 py-2 hover:border-emerald-300/50">فواتير البيع</Link>
+                    <Link href="/pos/devices" class="rounded-xl border border-white/10 px-3 py-2 hover:border-emerald-300/50">إعدادات الأجهزة</Link>
                 </nav>
             </div>
         </header>

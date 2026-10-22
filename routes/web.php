@@ -124,6 +124,7 @@ Route::middleware(['auth', SecurityHeaders::class])->group(function () {
         Route::get('/purchase-returns', [PurchaseReturnController::class, 'index'])->name('purchase-returns.index');
         Route::post('/purchase-invoices/{purchaseInvoice}/returns', [PurchaseReturnController::class, 'store'])->whereNumber('purchaseInvoice')->middleware('throttle:30,1')->name('purchase-invoices.returns.store');
 
+        Route::get('/pos/devices', fn () => Inertia::render('POS/Devices'))->name('pos.devices');
         Route::get('/pos', [PointOfSaleController::class, 'index'])->name('pos.index');
         Route::get('/pos/products/search', [PointOfSaleController::class, 'searchProducts'])->middleware('throttle:120,1')->name('pos.products.search');
         Route::get('/pos/customers/search', [PointOfSaleController::class, 'searchCustomers'])->middleware('throttle:60,1,pos-customer-search')->name('pos.customers.search');

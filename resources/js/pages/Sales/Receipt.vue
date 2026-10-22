@@ -1,9 +1,11 @@
 <script setup>
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
+import { loadHardwareSettings, saveHardwareSettings } from '../../lib/pos/hardware';
 import { Head, Link } from '@inertiajs/vue3';
 
 const props = defineProps({ organization: { type: Object, required: true }, sale: { type: Object, required: true } });
-const paperWidth = ref('80');
+const paperWidth = ref(loadHardwareSettings().receiptWidth);
+watch(paperWidth, (value) => saveHardwareSettings({ receiptWidth: value }));
 const paymentLabels = { cash: 'نقدي', card: 'بطاقة', mobile_wallet: 'محفظة إلكترونية', other: 'أخرى', credit: 'آجل على حساب العميل' };
 const statusLabels = { paid: 'مدفوعة', due: 'آجل — مستحق', partially_paid: 'مدفوعة جزئيًا' };
 const returnStatusLabels = { none: 'لا توجد مرتجعات', partially_returned: 'مرتجع جزئي', returned: 'مرتجع بالكامل' };
@@ -24,7 +26,7 @@ function printReceipt() {
     <Head :title="`إيصال ${sale.invoiceNumber} | Metrik POS`" />
     <main dir="rtl" class="min-h-screen bg-slate-950 px-4 py-8 text-slate-100 print-shell">
         <div class="no-print mx-auto mb-5 flex max-w-3xl flex-wrap items-center justify-between gap-3">
-            <Link :href="`/sales/${sale.id}`" class="text-sm text-emerald-200 hover:underline">← العودة لتفاصيل الفاتورة</Link>
+            <div class="flex flex-wrap gap-3"><Link :href="`/sales/${sale.id}`" class="text-sm text-emerald-200 hover:underline">← العودة لتفاصيل الفاتورة</Link><Link href="/pos/devices" class="text-sm text-emerald-200 hover:underline">إعدادات الطابعة والأجهزة</Link></div>
             <div class="flex flex-wrap items-center gap-2">
                 <label class="flex items-center gap-2 rounded-xl border border-white/10 px-3 py-2 text-sm">
                     <span>عرض الورق</span>
