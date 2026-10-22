@@ -126,6 +126,7 @@ function submitCount() {
                 <nav class="flex flex-wrap gap-2">
                     <Link href="/products" class="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold hover:border-emerald-300/60">المنتجات</Link>
                     <Link href="/inventory/transfers" class="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold hover:border-emerald-300/60">تحويل المخزون</Link>
+                    <Link href="/inventory/low-stock" class="rounded-xl border border-amber-300/30 px-4 py-2 text-sm font-semibold text-amber-200 hover:border-amber-300/60">تنبيهات المخزون</Link>
                     <Link href="/branches" class="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold hover:border-emerald-300/60">الفروع</Link>
                     <Link href="/dashboard" class="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold hover:border-emerald-300/60">لوحة التحكم</Link>
                 </nav>

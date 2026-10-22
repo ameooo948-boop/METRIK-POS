@@ -116,10 +116,11 @@ function formatMoney(value) {
                     <p class="font-black tracking-wide">METRIK <span class="text-emerald-300">POS</span></p>
                     <p class="mt-1 text-sm text-slate-400">{{ organization.name }} · {{ currentBranch.name }}</p>
                 </div>
-                <div class="flex items-center gap-2">
+                <div class="flex flex-wrap items-center gap-2">
                     <Link href="/branches" class="hidden rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold hover:border-emerald-300/60 sm:inline-flex">الفروع</Link>
                     <Link v-if="canManageInventory" href="/inventory/transfers" class="rounded-xl border border-emerald-300/30 px-4 py-2 text-sm font-semibold text-emerald-200 hover:border-emerald-300/60">تحويل المخزون</Link>
                     <Link v-if="canManageInventory" href="/inventory/counts" class="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold hover:border-emerald-300/60">الجرد الفعلي</Link>
+                    <Link v-if="canManageInventory" href="/inventory/low-stock" class="rounded-xl border border-amber-300/30 px-4 py-2 text-sm font-semibold text-amber-200 hover:border-amber-300/60">تنبيهات المخزون</Link>
                     <Link href="/dashboard" class="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold hover:border-emerald-300/60">لوحة التحكم</Link>
                 </div>
             </div>
@@ -267,8 +268,8 @@ function formatMoney(value) {
                                 <td class="px-5 py-4 whitespace-nowrap">{{ formatMoney(product.purchasePrice) }} ج.م</td>
                                 <td class="px-5 py-4 whitespace-nowrap">{{ formatMoney(product.sellingPrice) }} ج.م</td>
                                 <td class="px-5 py-4 whitespace-nowrap">
-                                    <span :class="Number(product.quantity) <= Number(product.lowStockThreshold) ? 'text-amber-200' : 'text-emerald-200'">{{ formatQuantity(product.quantity) }}</span>
-                                    <p class="mt-1 text-xs text-slate-500">حد التنبيه: {{ formatQuantity(product.lowStockThreshold) }}</p>
+                                    <span :class="Number(product.lowStockThreshold) > 0 && Number(product.quantity) <= Number(product.lowStockThreshold) ? 'text-amber-200' : 'text-emerald-200'">{{ formatQuantity(product.quantity) }}</span>
+                                    <p class="mt-1 text-xs text-slate-500">حد التنبيه الفعلي للفرع: {{ formatQuantity(product.lowStockThreshold) }}</p>
                                 </td>
                                 <td class="px-5 py-4 text-slate-300" dir="ltr">{{ product.barcodes[0]?.barcode || '—' }}</td>
                                 <td class="px-5 py-4">

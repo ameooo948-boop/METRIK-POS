@@ -14,6 +14,7 @@ use App\Http\Controllers\Organizations\TeamMemberController;
 use App\Http\Controllers\Inventory\InventoryAdjustmentController;
 use App\Http\Controllers\Inventory\StockTransferController;
 use App\Http\Controllers\Inventory\InventoryStockCountController;
+use App\Http\Controllers\Inventory\LowStockController;
 use App\Http\Controllers\Organizations\OrganizationSetupController;
 use App\Http\Controllers\Organizations\SwitchOrganizationController;
 use App\Http\Controllers\POS\CashShiftController;
@@ -72,6 +73,8 @@ Route::middleware(['auth', SecurityHeaders::class])->group(function () {
         Route::post('/inventory/transfers', [StockTransferController::class, 'store'])->name('inventory.transfers.store');
         Route::get('/inventory/counts', [InventoryStockCountController::class, 'index'])->name('inventory.stock-counts.index');
         Route::post('/inventory/counts', [InventoryStockCountController::class, 'store'])->middleware('throttle:30,1,inventory-stock-counts-store')->name('inventory.stock-counts.store');
+        Route::get('/inventory/low-stock', [LowStockController::class, 'index'])->name('inventory.low-stock.index');
+        Route::patch('/inventory/low-stock/{productId}/threshold', [LowStockController::class, 'updateThreshold'])->whereNumber('productId')->middleware('throttle:60,1,inventory-reorder-threshold-update')->name('inventory.low-stock.threshold.update');
 
         Route::get('/suppliers', [SupplierController::class, 'index'])->name('suppliers.index');
         Route::post('/suppliers', [SupplierController::class, 'store'])->middleware('throttle:30,1')->name('suppliers.store');

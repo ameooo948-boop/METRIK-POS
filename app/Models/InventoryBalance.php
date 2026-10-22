@@ -10,11 +10,11 @@ class InventoryBalance extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['organization_id', 'branch_id', 'product_id', 'quantity'];
+    protected $fillable = ['organization_id', 'branch_id', 'product_id', 'quantity', 'reorder_threshold'];
 
     protected function casts(): array
     {
-        return ['quantity' => 'decimal:3'];
+        return ['quantity' => 'decimal:3', 'reorder_threshold' => 'decimal:3'];
     }
 
     public function organization(): BelongsTo
