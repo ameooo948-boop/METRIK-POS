@@ -7,31 +7,30 @@ on:
 
 permissions:
   contents: read
-
-# No workflow-level concurrency group is configured deliberately.
-# CI runs are isolated (temporary SQLite DB and array cache/session), so allowing
-# multiple runs to execute independently avoids concurrency-based cancellation.
+# Keep runs for the same ref queued instead of replacing an older pending run.
+# GitHub supports up to 100 pending runs per concurrency group.
+concurrency:
+  group: metrik-pos-ci-${{ github.ref }}
+  queue: max
 
 jobs:
   validate:
     name: Validate Laravel and Vue application
     runs-on: ubuntu-24.04
     timeout-minutes: 20
-
     env:
       APP_ENV: testing
       APP_DEBUG: "false"
       APP_URL: http://localhost
       DB_CONNECTION: sqlite
       DB_DATABASE: database/ci.sqlite
-      # Keep rate-limit counters isolated between test cases; a file cache can
-      # persist throttle hits across the suite and cause unrelated 429 failures.
+      # Keep the default cache in memory. tests/TestCase.php also flushes test
+      # cache state per test case, so SQLite ID reuse cannot inherit old throttles.
       CACHE_STORE: array
       SESSION_DRIVER: array
       QUEUE_CONNECTION: database
       MAIL_MAILER: log
       FILESYSTEM_DISK: local
-
     steps:
       - name: Check out source
         uses: actions/checkout@v7
@@ -43,7 +42,6 @@ jobs:
           extensions: curl, dom, fileinfo, mbstring, openssl, pdo_sqlite, sqlite3, tokenizer, xml
           coverage: none
           tools: composer:v2
-
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
@@ -56,7 +54,6 @@ jobs:
 
       - name: Install PHP dependencies
         run: composer install --no-interaction --prefer-dist --no-progress
-
       - name: Prepare isolated CI environment
         shell: bash
         run: |
@@ -71,7 +68,6 @@ jobs:
 
       - name: Install JavaScript dependencies
         run: npm ci
-
       - name: Build frontend assets
         run: npm run build
 
