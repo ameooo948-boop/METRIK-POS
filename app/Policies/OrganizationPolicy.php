@@ -134,6 +134,12 @@ class OrganizationPolicy
         return in_array($this->roleFor($user, $organization), ['owner', 'admin', 'branch_manager', 'accountant'], true);
     }
 
+    public function viewAuditLogs(User $user, Organization $organization): bool
+    {
+        // Audit history includes financial and permission changes, so keep it to organization owners/admins.
+        return in_array($this->roleFor($user, $organization), ['owner', 'admin'], true);
+    }
+
     private function roleFor(User $user, Organization $organization): ?string
     {
         $membership = $user->organizations()
