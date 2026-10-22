@@ -58,7 +58,26 @@ const isConnected = computed(() => isOnline.value && serverReachable.value);
 const needsReviewCount = computed(() => needsReviewEntries.value.length);
 
 const openShiftForm = useForm({ opening_amount: '0.00' });
-const closeShiftForm = useForm({ closing_amount: props.shift?.expectedCash ?? '0.00' });
+const closeShiftForm = useForm({ closing_amount: props.shift?.expectedCash ?? '0.00', cash_count: [], closing_notes: '' });
+const showCashCount = ref(false);
+const closeShiftNotes = ref('');
+const cashDenominations = ref([
+    { denomination: '200.00', label: '200 جنيه', count: 0 },
+    { denomination: '100.00', label: '100 جنيه', count: 0 },
+    { denomination: '50.00', label: '50 جنيه', count: 0 },
+    { denomination: '20.00', label: '20 جنيه', count: 0 },
+    { denomination: '10.00', label: '10 جنيه', count: 0 },
+    { denomination: '5.00', label: '5 جنيه', count: 0 },
+    { denomination: '1.00', label: '1 جنيه', count: 0 },
+    { denomination: '0.50', label: '50 قرش', count: 0 },
+    { denomination: '0.25', label: '25 قرش', count: 0 },
+]);
+const countedCashCents = computed(() => cashDenominations.value.reduce((sum, row) => sum + Math.round(Number(row.denomination) * 100) * Math.max(0, Number.parseInt(row.count, 10) || 0), 0));
+const countedCashTotal = computed(() => (countedCashCents.value / 100).toFixed(2));
+const hasCountedCash = computed(() => cashDenominations.value.some((row) => (Number.parseInt(row.count, 10) || 0) > 0));
+watch([showCashCount, countedCashCents], () => {
+    if (showCashCount.value && hasCountedCash.value) closeShiftForm.closing_amount = countedCashTotal.value;
+});
 watch(() => props.shift?.expectedCash, (value) => {
     if (value !== undefined && !closeShiftForm.isDirty) closeShiftForm.closing_amount = value;
 });
@@ -403,6 +422,14 @@ function openShift() {
 
 async function closeShift() {
     if (!props.shift) return;
+    if (showCashCount.value && !hasCountedCash.value) {
+        offlineStatusMessage.value = 'أدخل عدد فئة نقدية واحدة على الأقل، أو عطّل تفاصيل العد.';
+        return;
+    }
+    closeShiftForm.cash_count = showCashCount.value
+        ? cashDenominations.value.filter((row) => (Number.parseInt(row.count, 10) || 0) > 0).map((row) => ({ denomination: row.denomination, count: Number.parseInt(row.count, 10) }))
+        : [];
+    closeShiftForm.closing_notes = closeShiftNotes.value.trim();
     await refreshOutboxCounts();
     if (pendingSalesCount.value || needsReviewCount.value) {
         offlineStatusMessage.value = 'لا يمكن إغلاق الوردية قبل مزامنة المبيعات المحلية ومعالجة العمليات التي تحتاج مراجعة.';
@@ -710,8 +737,8 @@ onBeforeUnmount(() => {
             <div v-if="errorMessage" class="rounded-xl border border-rose-300/20 bg-rose-300/10 px-4 py-3 text-sm text-rose-200" role="alert">{{ errorMessage }}</div>
             <div class="flex flex-col justify-between gap-3 md:flex-row md:items-end">
                 <section><p class="text-sm font-semibold text-emerald-300">المبيعات</p><h1 class="mt-2 text-3xl font-black sm:text-4xl">نقطة البيع POS</h1><p class="mt-2 text-sm text-slate-400">الأسعار والإجماليات النهائية يعيد الخادم حسابها قبل اعتماد الفاتورة.</p></section>
-                <div v-if="shift" class="rounded-2xl border border-emerald-300/20 bg-emerald-300/5 px-4 py-3 text-sm"><p class="font-bold text-emerald-200">الوردية مفتوحة #{{ shift.id }}</p><p class="mt-1 text-slate-300">بدأت {{ shift.openedAt }} · رصيد البداية {{ money(shift.openingAmount) }} ج.م</p></div>
-                <div v-else class="rounded-2xl border border-amber-300/20 bg-amber-300/5 px-4 py-3 text-sm text-amber-100">يجب فتح وردية قبل تسجيل المبيعات.</div>
+                <div v-if="shift" class="rounded-2xl border border-emerald-300/20 bg-emerald-300/5 px-4 py-3 text-sm"><p class="font-bold text-emerald-200">الوردية مفتوحة #{{ shift.id }}</p><p class="mt-1 text-slate-300">بدأت {{ shift.openedAt }} · رصيد البداية {{ money(shift.openingAmount) }} ج.م</p><Link href="/pos/shifts/history" class="mt-3 inline-flex rounded-lg border border-white/10 px-3 py-2 text-xs font-bold text-slate-200 hover:bg-white/5">سجل الورديات والتسويات</Link></div>
+                <div v-else class="flex flex-wrap items-center gap-3"><p class="rounded-xl border border-amber-300/20 bg-amber-300/5 px-4 py-3 text-sm text-amber-100">يجب فتح وردية قبل تسجيل المبيعات.</p><Link href="/pos/shifts/history" class="inline-flex items-center rounded-xl border border-white/10 px-4 py-3 text-sm font-bold text-slate-200 hover:bg-white/5">سجل الورديات والتسويات</Link></div>
             </div>
 
             <section v-if="!shift" class="max-w-2xl rounded-2xl border border-white/10 bg-slate-900 p-5 sm:p-6">
@@ -774,8 +801,18 @@ onBeforeUnmount(() => {
                 </section>
             </div>
 
-            <section v-if="shift" class="rounded-2xl border border-white/10 bg-slate-900 p-5 sm:p-6">
-                <div class="grid gap-5 md:grid-cols-[minmax(0,1fr)_minmax(280px,0.8fr)] md:items-end"><div><h2 class="text-xl font-bold">إغلاق الوردية</h2><p class="mt-2 text-sm leading-6 text-slate-400">النقدية المتوقعة: {{ money(shift.expectedCash) }} ج.م. أدخل النقدية التي وجدتها فعليًا، وسيُسجل النظام الفرق للمراجعة.</p></div><form class="flex flex-col gap-3 sm:flex-row" @submit.prevent="closeShift"><div class="flex-1"><label for="closing-amount" class="mb-2 block text-sm font-medium">النقدية الفعلية (ج.م)</label><input id="closing-amount" v-model="closeShiftForm.closing_amount" type="number" min="0" step="0.01" required class="w-full rounded-xl border border-white/10 bg-slate-950 px-4 py-3 outline-none focus:border-emerald-300" /><p v-if="closeShiftForm.errors.closing_amount" class="mt-1 text-sm text-rose-300">{{ closeShiftForm.errors.closing_amount }}</p></div><button :disabled="closeShiftForm.processing || !isConnected || pendingSalesCount > 0 || needsReviewCount > 0" class="self-end rounded-xl border border-rose-300/30 px-5 py-3 font-bold text-rose-200 hover:bg-rose-300/10 disabled:opacity-50">{{ closeShiftForm.processing ? 'جارٍ الإغلاق...' : 'إغلاق الوردية' }}</button></form></div>
+            <section v-if="shift" class="space-y-5 rounded-2xl border border-white/10 bg-slate-900 p-5 sm:p-6">
+                <div class="flex flex-wrap items-start justify-between gap-3"><div><h2 class="text-xl font-bold">مراجعة الخزينة وإغلاق الوردية</h2><p class="mt-2 max-w-2xl text-sm leading-6 text-slate-400">راجع حركات النقدية قبل الإغلاق. النقدية المتوقعة {{ money(shift.expectedCash) }} ج.م؛ الفرق النهائي هو النقدية الفعلية ناقص المتوقعة.</p></div><Link :href="`/pos/shifts/${shift.id}/report`" class="inline-flex rounded-xl border border-white/10 px-3 py-2 text-sm font-bold text-slate-200 hover:bg-white/5">فتح تقرير الوردية</Link></div>
+                <details class="rounded-xl border border-white/10 bg-slate-950/50 p-4" open><summary class="cursor-pointer font-bold">حركات القبض والصرف ({{ shift.movements?.length || 0 }})</summary><div v-if="shift.movements?.length" class="mt-4 overflow-x-auto"><table class="w-full min-w-[680px] text-right text-sm"><thead class="text-slate-400"><tr><th class="p-2">الوقت</th><th class="p-2">الحركة</th><th class="p-2">المرجع</th><th class="p-2">المبلغ</th><th class="p-2">أثر النقدية</th></tr></thead><tbody><tr v-for="movement in shift.movements" :key="movement.id" class="border-t border-white/5"><td class="p-2 text-slate-400">{{ movement.date }}</td><td class="p-2">{{ movement.typeLabel }}</td><td class="p-2 text-slate-400">{{ movement.reference || movement.notes || '—' }}</td><td class="p-2">{{ money(movement.amount) }} ج.م</td><td class="p-2" :class="String(movement.cashEffect).startsWith('-') ? 'text-rose-300' : 'text-emerald-200'">{{ money(movement.cashEffect) }} ج.م</td></tr></tbody></table></div><p v-else class="mt-3 text-sm text-slate-500">لا توجد حركات نقدية مسجلة بعد.</p></details>
+                <form class="space-y-4" @submit.prevent="closeShift">
+                    <div class="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] md:items-start">
+                        <div><label for="closing-amount" class="mb-2 block text-sm font-medium">النقدية الفعلية (ج.م)</label><input id="closing-amount" v-model="closeShiftForm.closing_amount" type="number" min="0" step="0.01" required :readonly="showCashCount" class="w-full rounded-xl border border-white/10 bg-slate-950 px-4 py-3 outline-none focus:border-emerald-300 read-only:text-emerald-200" /><p v-if="showCashCount" class="mt-1 text-xs text-slate-400">يتم احتساب الإجمالي من الفئات أدناه.</p><p v-if="closeShiftForm.errors.closing_amount" class="mt-1 text-sm text-rose-300">{{ closeShiftForm.errors.closing_amount }}</p></div>
+                        <div><label for="closing-notes" class="mb-2 block text-sm font-medium">ملاحظة الإغلاق (اختياري)</label><input id="closing-notes" v-model="closeShiftNotes" maxlength="500" class="w-full rounded-xl border border-white/10 bg-slate-950 px-4 py-3 outline-none focus:border-emerald-300" placeholder="سبب العجز أو الزيادة أو ملاحظة للمحاسب" /><p v-if="closeShiftForm.errors.closing_notes" class="mt-1 text-sm text-rose-300">{{ closeShiftForm.errors.closing_notes }}</p></div>
+                    </div>
+                    <label class="flex items-center gap-3 text-sm font-semibold"><input v-model="showCashCount" type="checkbox" class="h-4 w-4 accent-emerald-300" /> تسجيل تفاصيل عدّ الفئات النقدية</label>
+                    <div v-if="showCashCount" class="rounded-xl border border-white/10 bg-slate-950/50 p-4"><div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"><label v-for="row in cashDenominations" :key="row.denomination" class="flex items-center justify-between gap-3 rounded-lg border border-white/5 p-3"><span class="text-sm">{{ row.label }}</span><input v-model.number="row.count" type="number" min="0" max="10000" step="1" class="w-24 rounded-lg border border-white/10 bg-slate-900 px-3 py-2 text-left" /></label></div><div class="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-white/10 pt-4"><span class="text-sm text-slate-400">إجمالي الفئات المعدودة</span><strong class="text-xl text-emerald-200">{{ money(countedCashTotal) }} ج.م</strong></div><p v-if="closeShiftForm.errors.cash_count" class="mt-2 text-sm text-rose-300">{{ closeShiftForm.errors.cash_count }}</p></div>
+                    <div class="flex flex-wrap items-center justify-between gap-3"><p class="max-w-xl text-xs leading-5 text-slate-500">لا يمكن إغلاق الوردية بوجود مبيعات دون مزامنة أو عمليات تحتاج مراجعة. يتم حفظ العجز أو الزيادة مع سجل الحركات وتفاصيل العد إن تم تفعيلها.</p><button :disabled="closeShiftForm.processing || !isConnected || pendingSalesCount > 0 || needsReviewCount > 0" class="rounded-xl border border-rose-300/30 px-5 py-3 font-bold text-rose-200 hover:bg-rose-300/10 disabled:opacity-50">{{ closeShiftForm.processing ? 'جارٍ الإغلاق...' : 'تأكيد الإغلاق والتسوية' }}</button></div>
+                </form>
             </section>
 
             <section class="space-y-4 rounded-2xl border border-white/10 bg-slate-900 p-5 sm:p-6">

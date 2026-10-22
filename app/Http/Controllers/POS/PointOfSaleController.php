@@ -38,6 +38,30 @@ class PointOfSaleController extends Controller
             ->where('status', 'open')
             ->first();
 
+        $shiftMovements = $shift ? $shift->movements()
+            ->with(['sale:id,invoice_number', 'saleReturn:id,return_number', 'supplierPayment:id,payment_number', 'createdBy:id,name'])
+            ->orderBy('created_at')->orderBy('id')->get()
+            ->map(static function ($movement): array {
+                $effect = match ($movement->movement_type) {
+                    'cash_sale', 'cash_in' => (string) $movement->amount,
+                    'cash_out', 'cash_return' => '-'.(string) $movement->amount,
+                    default => '0.00',
+                };
+                return [
+                    'id' => (int) $movement->getKey(), 'date' => $movement->created_at?->format('H:i:s'),
+                    'type' => (string) $movement->movement_type,
+                    'typeLabel' => match ($movement->movement_type) {
+                        'cash_sale' => 'مبيعات نقدية', 'cash_in' => 'قبض نقدي',
+                        'cash_out' => 'صرف نقدي', 'cash_return' => 'رد نقدي لمرتجع',
+                        default => (string) $movement->movement_type,
+                    },
+                    'amount' => (string) $movement->amount, 'cashEffect' => $effect,
+                    'notes' => $movement->notes,
+                    'reference' => $movement->sale?->invoice_number ?? $movement->saleReturn?->return_number ?? $movement->supplierPayment?->payment_number,
+                    'createdBy' => $movement->createdBy?->name,
+                ];
+            })->values()->all() : [];
+
         $role = OrganizationRole::tryFrom((string) $request->attributes->get('currentOrganizationRole'));
         $activePromotions = Promotion::query()
             ->forOrganization((int) $organization->getKey())
@@ -102,6 +126,7 @@ class PointOfSaleController extends Controller
                 'openingAmount' => $shift->opening_amount,
                 'expectedCash' => $shift->expectedCashAmount(),
                 'openedAt' => $shift->opened_at?->format('Y-m-d H:i'),
+                'movements' => $shiftMovements,
             ] : null,
             'initialCustomers' => $initialCustomers,
             'activePromotions' => $activePromotions,

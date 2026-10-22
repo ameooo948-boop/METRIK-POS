@@ -53,6 +53,8 @@ class CashShiftController extends Controller
             cashierId: (int) $request->user()->getKey(),
             shiftId: $shiftId,
             closingAmount: (string) $request->validated('closing_amount'),
+            cashCount: $request->validated('cash_count') ?: null,
+            closingNotes: ($notes = trim((string) ($request->validated('closing_notes') ?? ''))) !== '' ? $notes : null,
         ));
 
         $difference = (string) $shift->difference_amount;

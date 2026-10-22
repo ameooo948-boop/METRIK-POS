@@ -15,7 +15,7 @@ class CashShift extends Model
 
     protected $fillable = [
         'organization_id', 'branch_id', 'cashier_id', 'opened_by', 'closed_by', 'status',
-        'opening_amount', 'expected_cash', 'closing_amount', 'difference_amount', 'opened_at', 'closed_at',
+        'opening_amount', 'expected_cash', 'closing_amount', 'difference_amount', 'cash_count_details', 'closing_notes', 'opened_at', 'closed_at',
     ];
 
     protected function casts(): array
@@ -25,6 +25,7 @@ class CashShift extends Model
             'expected_cash' => 'decimal:2',
             'closing_amount' => 'decimal:2',
             'difference_amount' => 'decimal:2',
+            'cash_count_details' => 'array',
             'opened_at' => 'datetime',
             'closed_at' => 'datetime',
         ];

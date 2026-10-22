@@ -24,6 +24,7 @@ use App\Http\Controllers\Inventory\InventoryLotController;
 use App\Http\Controllers\Organizations\OrganizationSetupController;
 use App\Http\Controllers\Organizations\SwitchOrganizationController;
 use App\Http\Controllers\POS\CashShiftController;
+use App\Http\Controllers\POS\CashShiftAuditController;
 use App\Http\Controllers\POS\PointOfSaleController;
 use App\Http\Controllers\POS\OfflineSaleSyncController;
 use App\Http\Controllers\POS\SaleCheckoutController;
@@ -124,6 +125,9 @@ Route::middleware(['auth', SecurityHeaders::class])->group(function () {
         Route::get('/pos/customers/search', [PointOfSaleController::class, 'searchCustomers'])->middleware('throttle:60,1,pos-customer-search')->name('pos.customers.search');
         Route::get('/pos/offline/catalog', [PointOfSaleController::class, 'offlineCatalog'])->middleware('throttle:30,1')->name('pos.offline.catalog');
         Route::post('/pos/offline/sync', OfflineSaleSyncController::class)->middleware('throttle:60,1')->name('pos.offline.sync');
+        Route::get('/pos/shifts/history/export', [CashShiftAuditController::class, 'export'])->middleware('throttle:30,1')->name('pos.shifts.history.export');
+        Route::get('/pos/shifts/history', [CashShiftAuditController::class, 'index'])->name('pos.shifts.history');
+        Route::get('/pos/shifts/{shiftId}/report', [CashShiftAuditController::class, 'report'])->whereNumber('shiftId')->name('pos.shifts.report');
         Route::post('/pos/shifts', [CashShiftController::class, 'open'])->middleware('throttle:20,1')->name('pos.shifts.open');
         Route::post('/pos/shifts/{shiftId}/close', [CashShiftController::class, 'close'])->whereNumber('shiftId')->middleware('throttle:20,1')->name('pos.shifts.close');
         Route::post('/pos/checkout', [SaleCheckoutController::class, 'store'])->middleware('throttle:60,1')->name('pos.checkout');
