@@ -118,7 +118,8 @@ class ReceivePurchaseOrder
                 $orderItems->get((int) $orderItemId)->forceFill(['quantity_received' => DecimalQuantity::fromMilli($receivedMilli)])->save();
             }
 
-            $orderItems->refresh();
+            // The items in this collection were updated and saved above.
+            // Eloquent collections do not have refresh(); refresh applies to a single model.
             $allReceived = $orderItems->every(static fn (PurchaseOrderItem $item): bool => DecimalQuantity::toMilli((string) $item->quantity_received) >= DecimalQuantity::toMilli((string) $item->quantity_ordered));
             $order->status = $allReceived ? 'received' : 'partially_received';
             $order->received_at = $allReceived ? now() : null;

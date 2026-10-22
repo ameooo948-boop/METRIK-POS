@@ -7,6 +7,7 @@ use App\Http\Controllers\Catalog\CategoryController;
 use App\Http\Controllers\Catalog\ProductController;
 use App\Http\Controllers\Catalog\ProductUnitController;
 use App\Http\Controllers\Customers\CustomerController;
+use App\Http\Controllers\Customers\CustomerStatementController;
 use App\Http\Controllers\Customers\CustomerReceivablesController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\Expenses\ExpenseController;
@@ -32,7 +33,9 @@ use App\Http\Controllers\Purchasing\PurchaseInvoiceController;
 use App\Http\Controllers\Purchasing\PurchaseOrderController;
 use App\Http\Controllers\Purchasing\SupplierPaymentController;
 use App\Http\Controllers\Purchasing\PurchaseReturnController;
+use App\Http\Controllers\Promotions\PromotionController;
 use App\Http\Controllers\Suppliers\SupplierController;
+use App\Http\Controllers\Suppliers\SupplierStatementController;
 use App\Http\Controllers\Suppliers\SupplierPerformanceController;
 use App\Http\Middleware\ResolveOrganizationContext;
 use App\Http\Middleware\RequestLogContext;
@@ -84,6 +87,9 @@ Route::middleware(['auth', SecurityHeaders::class])->group(function () {
         Route::post('/products/{productId}/barcodes', [ProductUnitController::class, 'storeBarcode'])->whereNumber('productId')->middleware('throttle:30,1')->name('products.barcodes.store');
         Route::delete('/products/{productId}/barcodes/{barcodeId}', [ProductUnitController::class, 'destroyBarcode'])->whereNumber('productId')->whereNumber('barcodeId')->middleware('throttle:30,1')->name('products.barcodes.destroy');
         Route::post('/categories', [CategoryController::class, 'store'])->middleware('throttle:30,1')->name('categories.store');
+        Route::get('/promotions', [PromotionController::class, 'index'])->name('promotions.index');
+        Route::post('/promotions', [PromotionController::class, 'store'])->middleware('throttle:30,1,promotions-store')->name('promotions.store');
+        Route::post('/promotions/{promotionId}/toggle', [PromotionController::class, 'toggle'])->whereNumber('promotionId')->middleware('throttle:60,1,promotions-toggle')->name('promotions.toggle');
         Route::post('/inventory/adjustments', [InventoryAdjustmentController::class, 'store'])->middleware('throttle:60,1')->name('inventory.adjustments.store');
         Route::get('/inventory/transfers', [StockTransferController::class, 'index'])->name('inventory.transfers.index');
         Route::post('/inventory/transfers', [StockTransferController::class, 'store'])->name('inventory.transfers.store');
@@ -96,6 +102,8 @@ Route::middleware(['auth', SecurityHeaders::class])->group(function () {
         Route::post('/inventory/lots', [InventoryLotController::class, 'store'])->middleware('throttle:30,1,inventory-lots-store')->name('inventory.lots.store');
         Route::patch('/inventory/low-stock/{productId}/threshold', [LowStockController::class, 'updateThreshold'])->whereNumber('productId')->middleware('throttle:60,1,inventory-reorder-threshold-update')->name('inventory.low-stock.threshold.update');
 
+        Route::get('/suppliers/{supplierId}/statement/export', [SupplierStatementController::class, 'export'])->whereNumber('supplierId')->middleware('throttle:30,1')->name('suppliers.statement.export');
+        Route::get('/suppliers/{supplierId}/statement', [SupplierStatementController::class, 'index'])->whereNumber('supplierId')->name('suppliers.statement');
         Route::get('/suppliers/performance/export', [SupplierPerformanceController::class, 'export'])->name('suppliers.performance.export');
         Route::get('/suppliers/performance', [SupplierPerformanceController::class, 'index'])->name('suppliers.performance.index');
         Route::get('/suppliers', [SupplierController::class, 'index'])->name('suppliers.index');
@@ -128,6 +136,8 @@ Route::middleware(['auth', SecurityHeaders::class])->group(function () {
         Route::get('/customers/receivables', [CustomerReceivablesController::class, 'index'])->name('customers.receivables.index');
         Route::get('/customers', [CustomerController::class, 'index'])->name('customers.index');
         Route::post('/customers', [CustomerController::class, 'store'])->middleware('throttle:30,1,customers-store')->name('customers.store');
+        Route::get('/customers/{customerId}/statement/export', [CustomerStatementController::class, 'export'])->whereNumber('customerId')->middleware('throttle:30,1')->name('customers.statement.export');
+        Route::get('/customers/{customerId}/statement', [CustomerStatementController::class, 'index'])->whereNumber('customerId')->name('customers.statement');
         Route::get('/customers/{customerId}', [CustomerController::class, 'show'])->whereNumber('customerId')->name('customers.show');
         Route::patch('/customers/{customerId}', [CustomerController::class, 'update'])->whereNumber('customerId')->middleware('throttle:30,1,customers-update')->name('customers.update');
         Route::post('/customers/{customerId}/payments', [CustomerController::class, 'collectPayment'])->whereNumber('customerId')->middleware('throttle:30,1,customer-account-payment')->name('customers.payments.store');
