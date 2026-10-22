@@ -13,7 +13,7 @@ This is an operational checklist, not a guarantee that the application is produc
 
 ## Build and deployment sequence
 
-1. Back up the database and user-generated files before deployment.
+1. Run `php artisan metrik:backup` and confirm `php artisan metrik:backup-check` passes before deployment; the backup must be stored outside the public web root. Keep an encrypted off-site copy and never rely on file existence alone.
 2. Deploy a reviewed Git commit/tag; install locked dependencies (`composer install --no-dev --prefer-dist --optimize-autoloader` and `npm ci`).
 3. Build frontend assets with `npm run build`.
 4. Apply additive migrations with `php artisan migrate --force`. Never use `migrate:fresh` on production.
@@ -48,6 +48,6 @@ This is an operational checklist, not a guarantee that the application is produc
 - `npm run build` completes with no errors.
 - `php artisan metrik:health-check --strict` passes on staging.
 - Tenant/branch authorization tests pass.
-- Restore from a fresh backup has been demonstrated in an isolated staging database.
+- `php artisan metrik:restore <archive> --verify-only` passes and a fresh restore has been demonstrated in an isolated staging environment.
 - Queue worker, failed-job handling, and offline sync have been smoke-tested.
 - Git working tree is clean after the release commit.

@@ -3,6 +3,7 @@
 namespace App\Services\POS;
 
 use App\Data\POS\CreateSaleData;
+use App\Events\OperationalReportDataChanged;
 use App\Enums\OrganizationRole;
 use App\Models\Branch;
 use App\Models\CashMovement;
@@ -31,7 +32,7 @@ class CheckoutSale
     public function handle(CreateSaleData $data): Sale
     {
         try {
-            return DB::transaction(function () use ($data): Sale {
+            $sale = DB::transaction(function () use ($data): Sale {
                 $existing = $this->existingSale($data, lock: true);
                 if ($existing) {
                     return $existing->load(['items', 'payments', 'branch', 'cashier']);
@@ -453,6 +454,10 @@ class CheckoutSale
 
                 return $sale->load(['items', 'payments', 'branch', 'cashier']);
             }, attempts: 3);
+
+            event(new OperationalReportDataChanged($data->organizationId));
+
+            return $sale;
         } catch (QueryException $exception) {
             // Concurrent duplicate submissions may race on the database unique key.
             $existing = $this->existingSale($data, lock: false);

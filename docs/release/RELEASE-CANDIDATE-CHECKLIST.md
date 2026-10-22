@@ -8,6 +8,7 @@
 - [ ] `npm run build` passes.
 - [ ] `composer check-platform-reqs --no-dev` passes on the deployment PHP runtime.
 - [ ] `php artisan metrik:health-check --strict` passes in a production-like environment.
+- [ ] `php artisan metrik:backup` completes and `php artisan metrik:backup-check` verifies a fresh archive.
 - [ ] `git diff --check` passes and `git status --short` is understood.
 - [ ] No `.env`, credentials, private exports, customer data, or database dumps are tracked.
 - [ ] All intended work is committed; the release commit hash is recorded.
@@ -72,7 +73,8 @@ Test on the actual supported browser/device, not only by mocking `navigator.onLi
 
 - [ ] A database backup is created outside the application web root.
 - [ ] Backup access is restricted and encryption is enabled where appropriate.
-- [ ] A restore was tested into a separate database/environment.
+- [ ] `php artisan metrik:restore <archive> --verify-only` succeeds; restore payload is extracted into an isolated directory and its hashes/database integrity are verified.
+- [ ] A MySQL dump (if applicable) was imported and tested in a separate staging database; a SQLite restore was opened and smoke-tested in staging.
 - [ ] Restored data is checked for organizations, products, stock balances/movements, sales, returns, supplier balances, and users.
 - [ ] Recovery Point Objective (RPO) and Recovery Time Objective (RTO) are documented.
 - [ ] A backup is not considered valid until a restore test succeeds.

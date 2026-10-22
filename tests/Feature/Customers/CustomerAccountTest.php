@@ -104,7 +104,7 @@ class CustomerAccountTest extends TestCase
         $this->assertDatabaseHas('customer_account_transactions', ['customer_id' => $customer->getKey(), 'sale_id' => $sale->getKey(), 'transaction_type' => 'sale', 'debit_amount' => '16.00']);
 
         $report = app(SalesReport::class)->handle(
-            (int) $organization->getKey(), [(int) $branch->getKey()], now()->toDateString(), now()->toDateString(),
+            (int) $organization->getKey(), [(int) $branch->getKey()], now($organization->timezone)->toDateString(), now($organization->timezone)->toDateString(),
         );
         $this->assertSame('16.00', $report['summary']['sales']);
         $this->assertSame('10.00', $report['summary']['costOfGoods']);

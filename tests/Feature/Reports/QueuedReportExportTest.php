@@ -24,7 +24,7 @@ class QueuedReportExportTest extends TestCase
     {
         Queue::fake();
         [$owner, $organization, $branch] = $this->createOrganizationFor('Queue Report Market');
-        $today = now()->toDateString();
+        $today = now($organization->timezone)->toDateString();
 
         $this->actingAs($owner)->post(route('reports.exports.store'), [
             'from_date' => $today,
@@ -55,8 +55,8 @@ class QueuedReportExportTest extends TestCase
             'organization_id' => $organization->getKey(),
             'requested_by' => $owner->getKey(),
             'branch_ids' => [$branch->getKey()],
-            'from_date' => now()->toDateString(),
-            'to_date' => now()->toDateString(),
+            'from_date' => now($organization->timezone)->toDateString(),
+            'to_date' => now($organization->timezone)->toDateString(),
             'status' => 'queued',
         ]);
 
@@ -80,8 +80,8 @@ class QueuedReportExportTest extends TestCase
         $branch->users()->attach($cashier->getKey());
 
         $this->actingAs($cashier)->post(route('reports.exports.store'), [
-            'from_date' => now()->toDateString(),
-            'to_date' => now()->toDateString(),
+            'from_date' => now($organization->timezone)->toDateString(),
+            'to_date' => now($organization->timezone)->toDateString(),
             'branch_id' => (string) $branch->getKey(),
         ])->assertForbidden();
 
@@ -99,8 +99,8 @@ class QueuedReportExportTest extends TestCase
             'organization_id' => $organization->getKey(),
             'requested_by' => $owner->getKey(),
             'branch_ids' => [$branch->getKey()],
-            'from_date' => now()->toDateString(),
-            'to_date' => now()->toDateString(),
+            'from_date' => now($organization->timezone)->toDateString(),
+            'to_date' => now($organization->timezone)->toDateString(),
             'status' => 'queued',
         ]);
 
@@ -118,11 +118,11 @@ class QueuedReportExportTest extends TestCase
 
         ReportExport::query()->create([
             'organization_id' => $organization->getKey(), 'requested_by' => $owner->getKey(),
-            'branch_ids' => [$branch->getKey()], 'from_date' => now()->toDateString(), 'to_date' => now()->toDateString(), 'status' => 'queued',
+            'branch_ids' => [$branch->getKey()], 'from_date' => now($organization->timezone)->toDateString(), 'to_date' => now($organization->timezone)->toDateString(), 'status' => 'queued',
         ]);
         ReportExport::query()->create([
             'organization_id' => $organization->getKey(), 'requested_by' => $otherUser->getKey(),
-            'branch_ids' => [$branch->getKey()], 'from_date' => now()->toDateString(), 'to_date' => now()->toDateString(), 'status' => 'queued',
+            'branch_ids' => [$branch->getKey()], 'from_date' => now($organization->timezone)->toDateString(), 'to_date' => now($organization->timezone)->toDateString(), 'status' => 'queued',
         ]);
 
         $this->actingAs($owner)->get(route('reports.index'))->assertOk()

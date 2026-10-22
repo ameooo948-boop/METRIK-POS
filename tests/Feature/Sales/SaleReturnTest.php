@@ -16,6 +16,7 @@ use App\Models\SaleReturnItem;
 use App\Models\Unit;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
@@ -86,6 +87,30 @@ class SaleReturnTest extends TestCase
         $balance = InventoryBalance::query()->where('branch_id', $branch->getKey())->where('product_id', $product->getKey())->firstOrFail();
         $this->assertSame('9.000', (string) $balance->quantity);
         $this->assertSame(1, SaleReturn::query()->where('sale_id', $sale->getKey())->count());
+    }
+
+    public function test_report_uses_organization_local_day_after_midnight_before_utc_rollover(): void
+    {
+        $previousTestNow = Carbon::getTestNow();
+        Carbon::setTestNow(Carbon::parse('2026-10-23 00:30:00', 'Africa/Cairo'));
+
+        try {
+            [$owner, $organization, $branch] = $this->createSale('Report Cairo Midnight Market');
+            $today = now($organization->timezone)->toDateString();
+
+            $this->actingAs($owner)->get(route('reports.index', [
+                'from_date' => $today,
+                'to_date' => $today,
+                'branch_id' => (string) $branch->getKey(),
+            ]))->assertOk()->assertInertia(fn (Assert $page) => $page
+                ->component('Reports/Index')
+                ->where('summary.sales', '16.00')
+                ->where('summary.costOfGoods', '10.00')
+                ->where('summary.grossProfit', '6.00')
+                ->where('daily.0.sales', '16.00'));
+        } finally {
+            Carbon::setTestNow($previousTestNow);
+        }
     }
 
     public function test_reports_subtract_returned_revenue_and_reverse_cost_only_for_restocked_items(): void

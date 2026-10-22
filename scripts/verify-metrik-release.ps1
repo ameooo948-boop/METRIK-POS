@@ -83,7 +83,7 @@ Invoke-Check -Name "PHP version" -Command {
     if ($LASTEXITCODE -ne 0) { throw "php -v failed" }
 }
 Invoke-Check -Name "Composer dependencies" -Command {
-    composer check-platform-reqs --no-dev --no-interaction -vvv
+    composer check-platform-reqs --no-dev -vvv
     $composerExitCode = $LASTEXITCODE
     if ($composerExitCode -ne 0) {
         throw "Composer check-platform-reqs exited with code $composerExitCode. Review the requirement details above; if none were printed, run 'composer check-platform-reqs --no-dev -vvv' directly in PowerShell and share its output."
@@ -112,6 +112,10 @@ Invoke-Check -Name "Metrik health check" -Command {
     }
     php artisan metrik:health-check --strict
     if ($LASTEXITCODE -ne 0) { throw "Metrik health check failed" }
+}
+Invoke-Check -Name "Backup freshness and archive integrity" -Command {
+    php artisan metrik:backup-check
+    if ($LASTEXITCODE -ne 0) { throw "No fresh verified backup was found; create a backup and resolve the issue before release." }
 }
 Invoke-Check -Name "Git whitespace check" -Command {
     git diff --check

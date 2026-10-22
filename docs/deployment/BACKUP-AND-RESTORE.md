@@ -1,39 +1,99 @@
-# Metrik POS — Database Backup and Restore (Windows)
+# Metrik POS — Backup and Restore Runbook
 
-## Backup
+This is the primary runbook for the Laravel backup commands. The PowerShell backup script remains available for operators who explicitly need a SQL/SQLite command-line dump, but do not schedule both mechanisms without a written storage/retention policy.
 
-Run PowerShell from the project root, or pass `-ProjectRoot` explicitly:
+## What is backed up
+
+`php artisan metrik:backup` creates a timestamped ZIP containing:
+
+- A consistent SQLite snapshot made with `VACUUM INTO`, or a MySQL logical dump streamed to disk by `mysqldump`.
+- The configured project-relative file paths from `METRIK_BACKUP_PATHS` (defaults include `storage/app/public` and `storage/app/private/report-exports`).
+- `manifest.json` with format version, creation time, database artifact, included paths, and SHA-256 hashes for every payload file.
+
+The command validates the completed ZIP and checksums before publishing it under its final name. Files are written with restrictive permissions where the operating system supports them. The destination must be outside the public web root and must not overlap any path being backed up.
+
+## Configuration
+
+```dotenv
+# Empty/unset uses storage/app/private/backups. Prefer an external protected volume in production.
+METRIK_BACKUP_DIRECTORY=
+METRIK_BACKUP_KEEP=14
+METRIK_BACKUP_PATHS=storage/app/public,storage/app/private/report-exports
+METRIK_MYSQLDUMP_BINARY=mysqldump
+METRIK_BACKUP_DUMP_TIMEOUT=300
+METRIK_BACKUP_SCHEDULE=02:15
+METRIK_BACKUP_MAX_AGE_HOURS=26
+# Optional: a real recipient and working mail transport are required for email alerts.
+# METRIK_BACKUP_ALERT_EMAIL=ops@example.com
+```
+
+Do not copy the sample alert address into production unless it is a real mailbox. Keep the actual `.env` out of Git and web-accessible directories. For MySQL, ensure `mysqldump`/`mariadb-dump` is installed and accessible to the PHP process. The command checks `PATH` and common Windows locations (including standard XAMPP installations). If PHP still cannot find it, set `METRIK_MYSQLDUMP_BINARY` to the executable's full path in `.env`, for example `METRIK_MYSQLDUMP_BINARY=C:/xampp/mysql/bin/mysqldump.exe`, then run `php artisan config:clear` (or rebuild the config cache). Do not put the executable path in the database password or other DB settings. Both MySQL and SQLite require PHP's `zip` extension for archive creation and verification. SQLite backups also require file-backed SQLite and the PDO SQLite extension. Do not point a backup path at the backup destination itself.
+
+## Manual operations
+
+Create and verify a fresh backup:
+
+```bash
+php artisan metrik:backup
+php artisan metrik:backup-check
+```
+
+Verify a chosen archive without extracting it:
+
+```bash
+php artisan metrik:restore "storage/app/private/backups/metrik-backup_YYYYMMDD_HHMMSS.zip" --verify-only
+```
+
+Extract and validate a restore payload in a new isolated directory:
+
+```bash
+php artisan metrik:restore "storage/app/private/backups/metrik-backup_YYYYMMDD_HHMMSS.zip" --destination="storage/app/private/restore-drills/drill-YYYYMMDD"
+```
+
+The restore command never replaces the configured/live database and will not extract into the public web root. For a SQLite backup, it runs `PRAGMA integrity_check` on the extracted database. For a MySQL backup, it validates the archived SQL file's checksum; import that dump only into a separate staging database using the MySQL client, then compare records and exercise workflows. Never use a restore drill as a live-production overwrite.
+
+## Scheduling and monitoring
+
+Laravel Scheduler contains a daily backup (default 02:15) and an hourly check. The check fails if no archive exists, the latest archive is older than `METRIK_BACKUP_MAX_AGE_HOURS`, the ZIP is corrupt, or payload checksums do not match. Inspect:
+
+- `storage/logs/metrik-backup.log`
+- `storage/logs/metrik-backup-check.log`
+- Laravel application logs for `Metrik backup failed` / `Metrik backup check failed`
+
+The server must run the scheduler every minute. On Windows, use Task Scheduler to run `php artisan schedule:run` from the project directory every minute. On Linux, use the documented Laravel cron entry. Configure a real `METRIK_BACKUP_ALERT_EMAIL` and a working mail transport for email alerts; otherwise use an external log/monitoring service to alert on non-zero exit codes and stale backups.
+
+Example Windows task command (adjust PHP path and project path):
 
 ```powershell
-.\scripts\backup-metrik-database.ps1 -ProjectRoot 'C:\laravel\metrik-pos' -BackupDirectory 'D:\MetrikPOSBackups' -RetentionDays 30
+C:\path\to\php.exe C:\laravel\metrik-pos\artisan schedule:run
 ```
 
-Supported `.env` connection types are `mysql`, `mariadb`, and `sqlite`. MySQL/MariaDB require `mysqldump` on `PATH`; SQLite requires `sqlite3` on `PATH`. The script reads connection settings locally and does not print the password. Backups are written outside the project by default to `%USERPROFILE%\MetrikPOSBackups`; copy them to a protected off-device location as part of the real backup policy.
+Do not launch two backup implementations against the same directory unless they share a retention and naming policy.
 
-Run backups on a schedule and monitor failures. A backup file is not enough: restore it periodically in a separate test database/machine and verify records and application workflows.
+## Retention, off-site storage, and recovery objectives
 
-## MySQL/MariaDB restore
+- Default retention is 14 archives; tune it to data change rate, disk capacity, and business requirements.
+- Keep at least one encrypted copy on a separate system/account/volume. The application command does not itself encrypt archives or upload them off-site.
+- Backups contain sensitive customer/business records. Restrict directory access and encrypt at rest and in transit when moving them.
+- Define a target Recovery Point Objective (RPO) and Recovery Time Objective (RTO); daily backup implies that the possible data-loss window can approach a day.
+- Monitor available disk space and alert if backup storage is nearing capacity.
 
-1. Confirm the backup and target DB name. Stop application writes and queue workers or use an isolated staging target.
-2. Take a separate backup of the current target before restoration.
-3. In a **Command Prompt** (not PowerShell), use MySQL client tools and redirect the dump into the intended database:
+## Restore-drill procedure
 
-```bat
-mysql.exe --host=127.0.0.1 --port=3306 --user=YOUR_DB_USER YOUR_DB_NAME < "D:\MetrikPOSBackups\metrikpos-YYYYMMDD-HHMMSS.sql"
-```
+1. Record the archive name, size, last-write time, and SHA-256 checksum.
+2. Run `metrik:restore ... --verify-only`.
+3. Extract with `--destination` to a new isolated location.
+4. For SQLite, confirm the command reports a successful `PRAGMA integrity_check`, then point a staging copy of the app at that file.
+5. For MySQL, import `database.sql` into an empty staging database, not production. Keep the import credentials out of the shell history where possible.
+6. Verify product count, latest sale and purchase invoice, inventory balance/movement consistency, cash-shift totals, customer/supplier balances, user login, organization isolation, and required stored files.
+7. Execute representative workflows in staging and document duration (RTO) and the timestamp of the newest recovered transaction (RPO evidence).
+8. Remove the staging data securely and record pass/fail, operator, date, archive identifier, and corrective actions.
 
-Enter the database password when prompted, or use a protected client option file. Do not put a password on the command line or commit it to a script. This command imports into the target database; it does not create the database for you.
+Perform a restore drill at least monthly and after changing the backup format, storage provider, or database configuration.
 
-## SQLite restore
+## Safety
 
-1. Stop PHP's web server and all queue workers.
-2. Use `sqlite3`'s `.backup` command to create a safety copy of the current database, then replace the database file with the `.sqlite` backup.
-3. Handle any `-wal` and `-shm` sidecar files only while all connections are stopped; do not overwrite a database that is still receiving writes.
-4. Restart the application and verify login, product counts, recent sales, stock movements, and reports.
-
-## Important safety rules
-
-- Do not run `migrate:fresh` against a database with business data.
-- Never restore directly over production as an experiment; demonstrate restore in an isolated environment first.
-- Database backups do not automatically include files stored outside the database (e.g. report exports or uploaded files). Back up required private storage separately and test those restores too.
-- Protect backups as sensitive business data and encrypt them at rest and in transit when moved off-device.
+- Never use `migrate:fresh` on a database with business data.
+- Never experiment with restoring directly over production.
+- Restore files/database to an isolated destination first. The command deliberately does not change Laravel's configured database or execute SQL dumps.
+- A ZIP's existence is not proof of recoverability: archive integrity, checksums, database integrity, and an application-level restore drill are all required.

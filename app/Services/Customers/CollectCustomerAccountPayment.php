@@ -2,6 +2,7 @@
 
 namespace App\Services\Customers;
 
+use App\Events\OperationalReportDataChanged;
 use App\Models\CashMovement;
 use App\Models\CashShift;
 use App\Models\Customer;
@@ -38,7 +39,7 @@ class CollectCustomerAccountPayment
             throw ValidationException::withMessages(['amount' => 'قيمة التحصيل يجب أن تكون أكبر من صفر.']);
         }
 
-        return DB::transaction(function () use (
+        $customer = DB::transaction(function () use (
             $organizationId, $branchId, $userId, $customerId, $saleId, $operationUuid,
             $amountCents, $paymentMethod, $reference,
         ): Customer {
@@ -184,6 +185,10 @@ class CollectCustomerAccountPayment
 
             return $customer->refresh();
         }, attempts: 3);
+
+        event(new OperationalReportDataChanged($organizationId));
+
+        return $customer;
     }
 
     private function assertSameOperation(

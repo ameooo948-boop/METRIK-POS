@@ -33,12 +33,18 @@ class StoreExpenseRequest extends FormRequest
 
     public function rules(): array
     {
+        $organization = $this->attributes->get('currentOrganization');
+        $timezone = $organization instanceof Organization && $organization->timezone
+            ? $organization->timezone
+            : (string) config('app.timezone');
+        $organizationToday = now($timezone)->toDateString();
+
         return [
             'category' => ['required', 'string', 'max:80'],
             'description' => ['required', 'string', 'max:180'],
             'amount' => ['required', 'numeric', 'gt:0', 'max:9999999999.99', 'decimal:0,2'],
             'payment_method' => ['required', Rule::in(['cash', 'bank_transfer', 'e_wallet', 'other'])],
-            'expense_date' => ['required', 'date_format:Y-m-d', 'before_or_equal:today'],
+            'expense_date' => ['required', 'date_format:Y-m-d', 'before_or_equal:'.$organizationToday],
             'notes' => ['nullable', 'string', 'max:2000'],
         ];
     }

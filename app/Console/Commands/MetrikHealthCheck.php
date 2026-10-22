@@ -38,6 +38,13 @@ class MetrikHealthCheck extends Command
             DB::select('SELECT 1');
         });
 
+        $this->checkValue(
+            'PHP zip extension for backup/restore',
+            extension_loaded('zip'),
+            $isProduction,
+            'Enable the PHP zip extension for the scheduled backup, archive verification, and restore workflow.',
+        );
+
         $requiredTables = [
             'users', 'organizations', 'branches', 'products',
             'inventory_balances', 'inventory_movements', 'sales',

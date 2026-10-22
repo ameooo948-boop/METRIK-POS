@@ -5,6 +5,7 @@ namespace App\Services\Reports;
 use App\Models\Expense;
 use App\Models\Sale;
 use App\Support\DecimalMoney;
+use DateTimeZone;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -21,7 +22,9 @@ class SalesReport
             return $this->emptyReport($fromDate, $toDate);
         }
 
-        $key = app(ReportCacheVersion::class)->cacheKey($organizationId, $branchIds, $fromDate, $toDate);
+        $timezone = $this->organizationTimezone($organizationId);
+        $key = app(ReportCacheVersion::class)->cacheKey($organizationId, $branchIds, $fromDate, $toDate)
+            .':timezone:'.hash('sha256', $timezone);
 
         $ttlSeconds = max(1, (int) config('metrik.performance.report_cache_ttl_seconds', 45));
 
@@ -30,20 +33,30 @@ class SalesReport
             $branchIds,
             $fromDate,
             $toDate,
+            $timezone,
         ));
     }
 
     /** @param list<int> $branchIds */
-    private function calculate(int $organizationId, array $branchIds, string $fromDate, string $toDate): array
+    private function calculate(int $organizationId, array $branchIds, string $fromDate, string $toDate, string $timezone): array
     {
-        $startAt = $fromDate.' 00:00:00';
-        $endAt = $toDate.' 23:59:59';
+        // Report dates belong to the organization's business calendar, but timestamps
+        // are stored as UTC. Use an exclusive UTC end boundary to avoid midnight gaps.
+        $startLocal = CarbonImmutable::createFromFormat('!Y-m-d', $fromDate, $timezone)->startOfDay();
+        $endLocalExclusive = CarbonImmutable::createFromFormat('!Y-m-d', $toDate, $timezone)->addDay()->startOfDay();
+        $startAt = $startLocal->utc()->format('Y-m-d H:i:s');
+        $endAtExclusive = $endLocalExclusive->utc()->format('Y-m-d H:i:s');
+        [$salesDayExpression, $salesDayBindings] = $this->localDayCase('sold_at', $fromDate, $toDate, $timezone);
+        [$itemsDayExpression, $itemsDayBindings] = $this->localDayCase('sales.sold_at', $fromDate, $toDate, $timezone);
+        [$returnsDayExpression, $returnsDayBindings] = $this->localDayCase('returned_at', $fromDate, $toDate, $timezone);
+        [$returnItemsDayExpression, $returnItemsDayBindings] = $this->localDayCase('sale_returns.returned_at', $fromDate, $toDate, $timezone);
 
         $sales = Sale::query()
             ->forOrganization($organizationId)
             ->whereIn('branch_id', $branchIds)
             ->whereIn('status', ['paid', 'due', 'partially_paid'])
-            ->whereBetween('sold_at', [$startAt, $endAt]);
+            ->where('sold_at', '>=', $startAt)
+            ->where('sold_at', '<', $endAtExclusive);
 
         $salesStats = (clone $sales)->selectRaw(
             'COUNT(*) as invoice_count, COALESCE(SUM(total), 0) as sales_total'
@@ -54,7 +67,8 @@ class SalesReport
             ->where('sale_items.organization_id', $organizationId)
             ->whereIn('sales.branch_id', $branchIds)
             ->whereIn('sales.status', ['paid', 'due', 'partially_paid'])
-            ->whereBetween('sales.sold_at', [$startAt, $endAt]);
+            ->where('sales.sold_at', '>=', $startAt)
+            ->where('sales.sold_at', '<', $endAtExclusive);
 
         $itemStats = (clone $itemsBase)->selectRaw(
             'COALESCE(SUM(sale_items.line_total), 0) as item_revenue, '
@@ -66,7 +80,8 @@ class SalesReport
             ->where('organization_id', $organizationId)
             ->whereIn('branch_id', $branchIds)
             ->where('status', 'completed')
-            ->whereBetween('returned_at', [$startAt, $endAt]);
+            ->where('returned_at', '>=', $startAt)
+            ->where('returned_at', '<', $endAtExclusive);
         $returnsStats = (clone $returnsBase)->selectRaw(
             'COALESCE(SUM(total), 0) as return_total'
         )->first();
@@ -76,7 +91,8 @@ class SalesReport
             ->where('sale_return_items.organization_id', $organizationId)
             ->whereIn('sale_returns.branch_id', $branchIds)
             ->where('sale_returns.status', 'completed')
-            ->whereBetween('sale_returns.returned_at', [$startAt, $endAt]);
+            ->where('sale_returns.returned_at', '>=', $startAt)
+            ->where('sale_returns.returned_at', '<', $endAtExclusive);
         $returnCostStats = (clone $returnItemsBase)->selectRaw(
             'COALESCE(SUM(CASE WHEN sale_return_items.restock = 1 '
             .'THEN ROUND(sale_return_items.quantity * sale_return_items.unit_cost_snapshot, 2) ELSE 0 END), 0) as returned_cost'
@@ -102,24 +118,28 @@ class SalesReport
         $averageCents = $invoiceCount > 0 ? intdiv($revenueCents + intdiv($invoiceCount, 2), $invoiceCount) : 0;
 
         $dailySales = (clone $sales)->selectRaw(
-            'DATE(sold_at) as report_day, COUNT(*) as invoice_count, COALESCE(SUM(total), 0) as sales_total'
-        )->groupByRaw('DATE(sold_at)')->get()->keyBy('report_day');
+            $salesDayExpression.' as report_day, COUNT(*) as invoice_count, COALESCE(SUM(total), 0) as sales_total',
+            $salesDayBindings,
+        )->groupByRaw($salesDayExpression, $salesDayBindings)->get()->keyBy('report_day');
 
         $dailyItems = (clone $itemsBase)->selectRaw(
-            'DATE(sales.sold_at) as report_day, '
+            $itemsDayExpression.' as report_day, '
             .'COALESCE(SUM(sale_items.line_total), 0) as item_revenue, '
-            .'COALESCE(SUM(ROUND(sale_items.quantity * sale_items.unit_cost_snapshot, 2)), 0) as cost_total'
-        )->groupByRaw('DATE(sales.sold_at)')->get()->keyBy('report_day');
+            .'COALESCE(SUM(ROUND(sale_items.quantity * sale_items.unit_cost_snapshot, 2)), 0) as cost_total',
+            $itemsDayBindings,
+        )->groupByRaw($itemsDayExpression, $itemsDayBindings)->get()->keyBy('report_day');
 
         $dailyReturns = (clone $returnsBase)->selectRaw(
-            'DATE(returned_at) as report_day, COALESCE(SUM(total), 0) as return_total'
-        )->groupByRaw('DATE(returned_at)')->get()->keyBy('report_day');
+            $returnsDayExpression.' as report_day, COALESCE(SUM(total), 0) as return_total',
+            $returnsDayBindings,
+        )->groupByRaw($returnsDayExpression, $returnsDayBindings)->get()->keyBy('report_day');
 
         $dailyReturnCosts = (clone $returnItemsBase)->selectRaw(
-            'DATE(sale_returns.returned_at) as report_day, '
+            $returnItemsDayExpression.' as report_day, '
             .'COALESCE(SUM(CASE WHEN sale_return_items.restock = 1 '
-            .'THEN ROUND(sale_return_items.quantity * sale_return_items.unit_cost_snapshot, 2) ELSE 0 END), 0) as returned_cost'
-        )->groupByRaw('DATE(sale_returns.returned_at)')->get()->keyBy('report_day');
+            .'THEN ROUND(sale_return_items.quantity * sale_return_items.unit_cost_snapshot, 2) ELSE 0 END), 0) as returned_cost',
+            $returnItemsDayBindings,
+        )->groupByRaw($returnItemsDayExpression, $returnItemsDayBindings)->get()->keyBy('report_day');
 
         $dailyExpenses = (clone $expensesBase)->selectRaw(
             'expense_date as report_day, COALESCE(SUM(amount), 0) as expense_total'
@@ -184,7 +204,8 @@ class SalesReport
             ->where('sale_payments.organization_id', $organizationId)
             ->whereIn('sales.branch_id', $branchIds)
             ->whereIn('sales.status', ['paid', 'due', 'partially_paid'])
-            ->whereBetween('sales.sold_at', [$startAt, $endAt])
+            ->where('sales.sold_at', '>=', $startAt)
+            ->where('sales.sold_at', '<', $endAtExclusive)
             ->selectRaw('sale_payments.payment_method as method, COALESCE(SUM(sale_payments.amount), 0) as total')
             ->groupBy('sale_payments.payment_method')
             ->orderByDesc('total')
@@ -216,6 +237,47 @@ class SalesReport
             'topProducts' => $topProducts,
             'paymentMethods' => $paymentMethods,
         ];
+    }
+
+    private function organizationTimezone(int $organizationId): string
+    {
+        $timezone = trim((string) DB::table('organizations')->where('id', $organizationId)->value('timezone'));
+        if ($timezone === '') {
+            return (string) config('app.timezone', 'UTC');
+        }
+
+        try {
+            new DateTimeZone($timezone);
+
+            return $timezone;
+        } catch (\Throwable) {
+            return (string) config('app.timezone', 'UTC');
+        }
+    }
+
+    /**
+     * Maps UTC timestamps to each organization-local reporting day using portable SQL.
+     * This avoids relying on MySQL timezone tables and handles timezone offset changes.
+     *
+     * @return array{0:string,1:list<string>}
+     */
+    private function localDayCase(string $column, string $fromDate, string $toDate, string $timezone): array
+    {
+        $expression = 'CASE';
+        $bindings = [];
+        $cursor = CarbonImmutable::createFromFormat('!Y-m-d', $fromDate, $timezone)->startOfDay();
+        $lastDay = CarbonImmutable::createFromFormat('!Y-m-d', $toDate, $timezone)->startOfDay();
+
+        while ($cursor <= $lastDay) {
+            $nextDay = $cursor->addDay()->startOfDay();
+            $expression .= ' WHEN '.$column.' >= ? AND '.$column.' < ? THEN ?';
+            $bindings[] = $cursor->utc()->format('Y-m-d H:i:s');
+            $bindings[] = $nextDay->utc()->format('Y-m-d H:i:s');
+            $bindings[] = $cursor->toDateString();
+            $cursor = $nextDay;
+        }
+
+        return [$expression.' ELSE NULL END', $bindings];
     }
 
     private function emptyReport(string $fromDate, string $toDate): array

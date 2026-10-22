@@ -14,6 +14,7 @@ use App\Models\SaleItem;
 use App\Models\Unit;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
@@ -46,7 +47,7 @@ class ReportsAndExpensesTest extends TestCase
             'discount_amount' => '0.00', 'tax_amount' => '0.00', 'line_total' => '100.00',
         ]);
 
-        $today = now()->toDateString();
+        $today = now($organization->timezone)->toDateString();
         $this->actingAs($owner)->post(route('expenses.store'), [
             'category' => 'كهرباء', 'description' => 'فاتورة الكهرباء', 'amount' => '50.00',
             'payment_method' => 'bank_transfer', 'expense_date' => $today,
@@ -69,12 +70,49 @@ class ReportsAndExpensesTest extends TestCase
             ->where('summary.netProfit', '-10.00'));
     }
 
+    public function test_expense_date_validation_uses_organization_local_today(): void
+    {
+        [$owner, $organization, $branch] = $this->createOrganizationFor('Timezone Expense Market');
+        $organization->update(['timezone' => 'Africa/Cairo']);
+
+        $previousAppTimezone = (string) config('app.timezone');
+        $previousPhpTimezone = date_default_timezone_get();
+        $this->app['config']->set('app.timezone', 'UTC');
+        date_default_timezone_set('UTC');
+        Carbon::setTestNow(Carbon::parse('2026-01-01 22:30:00', 'UTC'));
+
+        try {
+            // In UTC it is still Jan 1, but the organization's local date is already Jan 2.
+            $localToday = now('Africa/Cairo')->toDateString();
+            $this->assertSame('2026-01-02', $localToday);
+
+            $this->actingAs($owner)->post(route('expenses.store'), [
+                'category' => 'تشغيل',
+                'description' => 'مصروف بتاريخ اليوم المحلي',
+                'amount' => '10.00',
+                'payment_method' => 'bank_transfer',
+                'expense_date' => $localToday,
+            ])->assertRedirect(route('expenses.index'));
+
+            $this->assertDatabaseHas('expenses', [
+                'organization_id' => $organization->getKey(),
+                'branch_id' => $branch->getKey(),
+                'expense_date' => $localToday,
+                'amount' => '10.00',
+            ]);
+        } finally {
+            Carbon::setTestNow();
+            $this->app['config']->set('app.timezone', $previousAppTimezone);
+            date_default_timezone_set($previousPhpTimezone);
+        }
+    }
+
     public function test_cash_expense_requires_open_shift_and_is_recorded_in_cash_ledger(): void
     {
         [$owner, $organization, $branch] = $this->createOrganizationFor('Cash Expense Market');
         $payload = [
             'category' => 'نقل', 'description' => 'مصاريف توصيل', 'amount' => '25.00',
-            'payment_method' => 'cash', 'expense_date' => now()->toDateString(),
+            'payment_method' => 'cash', 'expense_date' => now($organization->timezone)->toDateString(),
         ];
 
         $this->actingAs($owner)->from(route('expenses.index'))
@@ -105,7 +143,7 @@ class ReportsAndExpensesTest extends TestCase
         $this->actingAs($cashier)->get(route('reports.index'))->assertForbidden();
         $this->actingAs($cashier)->post(route('expenses.store'), [
             'category' => 'تشغيل', 'description' => 'غير مصرح', 'amount' => '10.00',
-            'payment_method' => 'bank_transfer', 'expense_date' => now()->toDateString(),
+            'payment_method' => 'bank_transfer', 'expense_date' => now($organization->timezone)->toDateString(),
         ])->assertForbidden();
 
         $this->assertDatabaseCount('expenses', 0);
@@ -122,12 +160,12 @@ class ReportsAndExpensesTest extends TestCase
         $branch->users()->attach($cashier->getKey());
 
         $this->actingAs($owner)->get(route('reports.index', [
-            'from_date' => now()->toDateString(), 'to_date' => now()->toDateString(), 'branch_id' => (string) $branch->getKey(),
+            'from_date' => now($organization->timezone)->toDateString(), 'to_date' => now($organization->timezone)->toDateString(), 'branch_id' => (string) $branch->getKey(),
         ]))->assertOk();
 
         // Cashier is denied reports before branch selection is processed.
         $this->actingAs($cashier)->get(route('reports.index', [
-            'from_date' => now()->toDateString(), 'to_date' => now()->toDateString(), 'branch_id' => (string) $secondBranch->getKey(),
+            'from_date' => now($organization->timezone)->toDateString(), 'to_date' => now($organization->timezone)->toDateString(), 'branch_id' => (string) $secondBranch->getKey(),
         ]))->assertForbidden();
     }
 
