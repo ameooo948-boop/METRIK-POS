@@ -22,7 +22,7 @@ function money(value) { return Number(value ?? 0).toLocaleString('ar-EG', { mini
         <section class="mx-auto max-w-7xl space-y-6">
             <header class="flex flex-wrap items-center justify-between gap-4">
                 <div><Link href="/dashboard" class="text-sm text-emerald-200 hover:underline">← لوحة التحكم</Link><p class="mt-4 text-sm font-semibold text-emerald-300">دليل العملاء</p><h1 class="mt-1 text-3xl font-black">العملاء والحسابات</h1><p class="mt-2 text-sm text-slate-400">{{ organization.name }} · سجّل بيانات العملاء وتابع المديونيات والتحصيلات.</p></div>
-                <Link href="/pos" class="rounded-xl bg-emerald-300 px-4 py-3 font-bold text-slate-950">نقطة البيع</Link>
+                <div class="flex flex-wrap gap-2"><Link href="/customers/receivables" class="rounded-xl border border-emerald-300/30 px-4 py-3 font-bold text-emerald-200 hover:bg-emerald-300/10">تقرير مديونيات العملاء</Link><Link href="/pos" class="rounded-xl bg-emerald-300 px-4 py-3 font-bold text-slate-950">نقطة البيع</Link></div>
             </header>
             <div v-if="flashMessage" class="rounded-xl border border-emerald-300/20 bg-emerald-300/10 px-4 py-3 text-sm text-emerald-200" role="status">{{ flashMessage }}</div>
             <div v-if="errorMessage" class="rounded-xl border border-rose-300/20 bg-rose-300/10 px-4 py-3 text-sm text-rose-200" role="alert">{{ errorMessage }}</div>

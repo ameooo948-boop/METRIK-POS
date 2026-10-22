@@ -6,6 +6,7 @@ use App\Http\Controllers\Branches\BranchController;
 use App\Http\Controllers\Catalog\CategoryController;
 use App\Http\Controllers\Catalog\ProductController;
 use App\Http\Controllers\Customers\CustomerController;
+use App\Http\Controllers\Customers\CustomerReceivablesController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\Expenses\ExpenseController;
 use App\Http\Controllers\Reports\ReportController;
@@ -108,6 +109,8 @@ Route::middleware(['auth', SecurityHeaders::class])->group(function () {
         Route::get('/sales/{saleId}/receipt', [SaleController::class, 'receipt'])->whereNumber('saleId')->name('sales.receipt');
         Route::post('/sales/{saleId}/returns', [SaleReturnController::class, 'store'])->whereNumber('saleId')->middleware('throttle:30,1')->name('sales.returns.store');
 
+        Route::get('/customers/receivables/export', [CustomerReceivablesController::class, 'export'])->middleware('throttle:30,1')->name('customers.receivables.export');
+        Route::get('/customers/receivables', [CustomerReceivablesController::class, 'index'])->name('customers.receivables.index');
         Route::get('/customers', [CustomerController::class, 'index'])->name('customers.index');
         Route::post('/customers', [CustomerController::class, 'store'])->middleware('throttle:30,1,customers-store')->name('customers.store');
         Route::get('/customers/{customerId}', [CustomerController::class, 'show'])->whereNumber('customerId')->name('customers.show');
