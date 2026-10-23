@@ -1,0 +1,64 @@
+/* Metrik POS transactional email theme. Laravel inlines these rules before sending. */
+body,
+body *:not(html):not(style):not(br):not(tr):not(code) {
+    box-sizing: border-box;
+    font-family: Arial, "Segoe UI", Tahoma, sans-serif;
+}
+
+body {
+    direction: rtl;
+    -webkit-text-size-adjust: none;
+    background-color: #f4f7fb;
+    color: #334155;
+    height: 100%;
+    line-height: 1.8;
+    margin: 0;
+    padding: 0;
+    text-align: right;
+    width: 100% !important;
+}
+
+p, ul, ol, blockquote { direction: rtl; line-height: 1.9; text-align: right; }
+a { color: #2563eb; }
+a img { border: none; }
+h1 { color: #0f172a; font-size: 25px; font-weight: 800; line-height: 1.5; margin-top: 0; text-align: right; }
+h2 { color: #0f172a; font-size: 19px; font-weight: 800; margin-top: 0; text-align: right; }
+h3 { color: #0f172a; font-size: 16px; font-weight: 700; margin-top: 0; text-align: right; }
+p { color: #475569; font-size: 15px; line-height: 1.9; margin-top: 0; text-align: right; }
+p.sub { color: #64748b; font-size: 12px; }
+img { max-width: 100%; }
+
+.wrapper { background-color: #f4f7fb; margin: 0; padding: 0; width: 100%; }
+.content { margin: 0; padding: 0; width: 100%; }
+.header { padding: 28px 0 20px; text-align: right; }
+.header a { color: #0f172a; font-size: 20px; font-weight: 900; text-decoration: none; }
+.body { background-color: #f4f7fb; border-bottom: 1px solid #f4f7fb; border-top: 1px solid #f4f7fb; margin: 0; padding: 0; width: 100%; }
+.inner-body { background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 18px; box-shadow: 0 10px 35px rgba(15, 23, 42, 0.06); margin: 0 auto; padding: 0; width: 600px; }
+.inner-body a { overflow-wrap: anywhere; word-break: break-word; }
+.content-cell { max-width: 100vw; padding: 36px 34px; }
+.subcopy { border-top: 1px solid #e2e8f0; margin-top: 24px; padding-top: 20px; }
+.subcopy p { color: #64748b; font-size: 13px; }
+.footer { margin: 0 auto; padding: 0; text-align: right; width: 600px; }
+.footer p { color: #94a3b8; font-size: 12px; text-align: right; }
+.footer a { color: #64748b; text-decoration: underline; }
+.table table { margin: 24px auto; width: 100%; }
+.table th { border-bottom: 1px solid #e2e8f0; margin: 0; padding-bottom: 8px; }
+.table td { color: #475569; font-size: 14px; line-height: 1.6; margin: 0; padding: 10px 0; }
+.action { margin: 26px auto; padding: 0; text-align: center; width: 100%; }
+.button { border-radius: 11px; color: #ffffff; display: inline-block; overflow: hidden; text-decoration: none; font-weight: 700; }
+.button-blue, .button-primary { background-color: #2563eb; border-bottom: 12px solid #2563eb; border-left: 22px solid #2563eb; border-right: 22px solid #2563eb; border-top: 12px solid #2563eb; }
+.button-green, .button-success { background-color: #059669; border-bottom: 12px solid #059669; border-left: 22px solid #059669; border-right: 22px solid #059669; border-top: 12px solid #059669; }
+.button-red, .button-error { background-color: #dc2626; border-bottom: 12px solid #dc2626; border-left: 22px solid #dc2626; border-right: 22px solid #dc2626; border-top: 12px solid #dc2626; }
+.panel { border-right: #2563eb solid 4px; border-left: 0; margin: 22px 0; }
+.panel-content { background-color: #eff6ff; color: #1e40af; padding: 16px 18px; }
+.panel-content p { color: #1e40af; }
+.panel-item { padding: 0; }
+.panel-item p:last-of-type { margin-bottom: 0; padding-bottom: 0; }
+.break-all { overflow-wrap: anywhere; word-break: break-word; }
+
+@media only screen and (max-width: 620px) {
+    .inner-body, .footer { width: 100% !important; }
+    .content-cell { padding: 24px 20px !important; }
+    .header { padding: 20px 16px 14px !important; }
+    h1 { font-size: 22px !important; }
+}

@@ -5,8 +5,11 @@ namespace App\Providers;
 use App\Contracts\Catalog\ProductRepository;
 use App\Repositories\Eloquent\EloquentProductRepository;
 use App\Observers\AuditedModelObserver;
+use Illuminate\Auth\Notifications\ResetPassword;
+use Illuminate\Auth\Notifications\VerifyEmail;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\ServiceProvider;
@@ -21,6 +24,34 @@ class AppServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        // Keep Laravel's secure reset-token and signed verification URL generation,
+        // while replacing only the message content and visual theme.
+        ResetPassword::toMailUsing(function (object $notifiable, string $token): MailMessage {
+            $url = url(route('password.reset', [
+                'token' => $token,
+                'email' => $notifiable->getEmailForPasswordReset(),
+            ], false));
+
+            return (new MailMessage)
+                ->theme('metrik')
+                ->subject('إعادة تعيين كلمة المرور | Metrik POS')
+                ->markdown('emails.auth.password-reset', [
+                    'userName' => filled($notifiable->name ?? null) ? (string) $notifiable->name : 'عميلنا العزيز',
+                    'actionUrl' => $url,
+                    'expireMinutes' => (int) config('auth.passwords.'.config('auth.defaults.passwords').'.expire'),
+                ]);
+        });
+
+        VerifyEmail::toMailUsing(function (object $notifiable, string $verificationUrl): MailMessage {
+            return (new MailMessage)
+                ->theme('metrik')
+                ->subject('تأكيد البريد الإلكتروني | Metrik POS')
+                ->markdown('emails.auth.verify-email', [
+                    'userName' => filled($notifiable->name ?? null) ? (string) $notifiable->name : 'عميلنا العزيز',
+                    'actionUrl' => $verificationUrl,
+                ]);
+        });
+
         // Audit only explicit business entities; credentials and free-text payloads are excluded by the observer.
         $auditedModels = [
             \App\Models\Product::class,
