@@ -30,7 +30,7 @@ class ReportFilterRequest extends FormRequest
         $this->merge([
             'from_date' => $this->input('from_date') ?: CarbonImmutable::createFromFormat('!Y-m-d', $effectiveTo)->subDays(6)->toDateString(),
             'to_date' => $requestedTo,
-            'branch_id' => $this->input('branch_id') ?: (string) ($this->attributes->get('currentBranch')?->getKey() ?? ''),
+            'branch_id' => $this->input('branch_id') ?: (string) ($this->attributes->get('currentBranch')?->getKey() ?? 'all'),
         ]);
     }
 

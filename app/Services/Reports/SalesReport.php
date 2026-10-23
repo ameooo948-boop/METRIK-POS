@@ -124,30 +124,57 @@ class SalesReport
         $invoiceCount = (int) ($salesStats->invoice_count ?? 0);
         $averageCents = $invoiceCount > 0 ? intdiv($revenueCents + intdiv($invoiceCount, 2), $invoiceCount) : 0;
 
-        $dailySales = (clone $sales)->selectRaw(
-            $salesDayExpression.' as report_day, COUNT(*) as invoice_count, COALESCE(SUM(total), 0) as sales_total, COALESCE(SUM(tax_total), 0) as sales_tax_total',
+        // Group outside a derived table instead of grouping the same CASE expression
+        // directly. Some supported MySQL configurations (ONLY_FULL_GROUP_BY) reject
+        // the direct CASE/sold_at shape even when the CASE is repeated in GROUP BY.
+        // The subquery computes one business-calendar day per source row; the outer
+        // query aggregates only by the resulting report_day column.
+        $dailySalesRows = (clone $sales)->selectRaw(
+            $salesDayExpression.' as report_day, total, tax_total',
             $salesDayBindings,
-        )->groupByRaw($salesDayExpression, $salesDayBindings)->get()->keyBy('report_day');
+        );
+        $dailySales = DB::query()->fromSub($dailySalesRows, 'daily_sales_rows')
+            ->selectRaw('report_day, COUNT(*) as invoice_count, COALESCE(SUM(total), 0) as sales_total, COALESCE(SUM(tax_total), 0) as sales_tax_total')
+            ->whereNotNull('report_day')
+            ->groupBy('report_day')
+            ->get()->keyBy('report_day');
 
-        $dailyItems = (clone $itemsBase)->selectRaw(
+        $dailyItemRows = (clone $itemsBase)->selectRaw(
             $itemsDayExpression.' as report_day, '
-            .'COALESCE(SUM(sale_items.line_total), 0) as item_revenue, '
-            .'COALESCE(SUM(ROUND(sale_items.quantity * sale_items.unit_cost_snapshot, 2)), 0) as cost_total',
+            .'sale_items.line_total as item_line_total, sale_items.quantity as item_quantity, '
+            .'sale_items.unit_cost_snapshot as item_unit_cost',
             $itemsDayBindings,
-        )->groupByRaw($itemsDayExpression, $itemsDayBindings)->get()->keyBy('report_day');
+        );
+        $dailyItems = DB::query()->fromSub($dailyItemRows, 'daily_item_rows')
+            ->selectRaw('report_day, COALESCE(SUM(item_line_total), 0) as item_revenue, COALESCE(SUM(ROUND(item_quantity * item_unit_cost, 2)), 0) as cost_total')
+            ->whereNotNull('report_day')
+            ->groupBy('report_day')
+            ->get()->keyBy('report_day');
 
-        $dailyReturns = (clone $returnsBase)->selectRaw(
-            $returnsDayExpression.' as report_day, COALESCE(SUM(total), 0) as return_total, COALESCE(SUM(tax_total), 0) as return_tax_total',
+        $dailyReturnRows = (clone $returnsBase)->selectRaw(
+            $returnsDayExpression.' as report_day, total, tax_total',
             $returnsDayBindings,
-        )->groupByRaw($returnsDayExpression, $returnsDayBindings)->get()->keyBy('report_day');
+        );
+        $dailyReturns = DB::query()->fromSub($dailyReturnRows, 'daily_return_rows')
+            ->selectRaw('report_day, COALESCE(SUM(total), 0) as return_total, COALESCE(SUM(tax_total), 0) as return_tax_total')
+            ->whereNotNull('report_day')
+            ->groupBy('report_day')
+            ->get()->keyBy('report_day');
 
-        $dailyReturnCosts = (clone $returnItemsBase)->selectRaw(
+        $dailyReturnItemRows = (clone $returnItemsBase)->selectRaw(
             $returnItemsDayExpression.' as report_day, '
-            .'COALESCE(SUM(sale_return_items.line_total), 0) as returned_revenue, '
-            .'COALESCE(SUM(CASE WHEN sale_return_items.restock = 1 '
-            .'THEN ROUND(sale_return_items.quantity * sale_return_items.unit_cost_snapshot, 2) ELSE 0 END), 0) as returned_cost',
+            .'sale_return_items.line_total as returned_line_total, '
+            .'sale_return_items.quantity as returned_quantity, '
+            .'sale_return_items.unit_cost_snapshot as returned_unit_cost, '
+            .'sale_return_items.restock as returned_restock',
             $returnItemsDayBindings,
-        )->groupByRaw($returnItemsDayExpression, $returnItemsDayBindings)->get()->keyBy('report_day');
+        );
+        $dailyReturnCosts = DB::query()->fromSub($dailyReturnItemRows, 'daily_return_item_rows')
+            ->selectRaw('report_day, COALESCE(SUM(returned_line_total), 0) as returned_revenue, '
+                .'COALESCE(SUM(CASE WHEN returned_restock = 1 THEN ROUND(returned_quantity * returned_unit_cost, 2) ELSE 0 END), 0) as returned_cost')
+            ->whereNotNull('report_day')
+            ->groupBy('report_day')
+            ->get()->keyBy('report_day');
 
         $dailyExpenses = (clone $expensesBase)->selectRaw(
             'expense_date as report_day, COALESCE(SUM(amount), 0) as expense_total'

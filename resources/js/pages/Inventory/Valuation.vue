@@ -14,6 +14,8 @@ const props = defineProps({
 const searchTerm = ref(props.filters.search ?? '');
 const categoryId = ref(props.filters.categoryId ? String(props.filters.categoryId) : '');
 const shownProducts = computed(() => props.products.data ?? []);
+const topValueProducts = computed(() => [...shownProducts.value].sort((a, b) => Number(b.stockCostValue ?? 0) - Number(a.stockCostValue ?? 0)).slice(0, 6));
+const stockCostChartMax = computed(() => Math.max(1, ...topValueProducts.value.map((product) => Number(product.stockCostValue ?? 0))));
 const exportUrl = computed(() => {
     const params = new URLSearchParams();
     if (searchTerm.value.trim()) params.set('search', searchTerm.value.trim());
@@ -54,23 +56,6 @@ function clearFilters() {
     <Head title="تقييم المخزون | Metrik POS" />
 
     <main dir="rtl" class="min-h-screen bg-slate-950 text-slate-100">
-        <header class="border-b border-white/10 bg-slate-900/90">
-            <div class="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4 px-5 py-4">
-                <div>
-                    <p class="font-black tracking-wide">METRIK <span class="text-emerald-300">POS</span></p>
-                    <p class="mt-1 text-sm text-slate-400">{{ organization.name }} · {{ currentBranch.name }}</p>
-                </div>
-                <nav class="flex flex-wrap gap-2">
-                    <Link href="/products" class="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold hover:border-emerald-300/60">المنتجات</Link>
-                    <Link href="/inventory/lots" class="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold hover:border-emerald-300/60">تشغيلات الصلاحية</Link>
-                    <Link href="/inventory/low-stock" class="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold hover:border-emerald-300/60">تنبيهات المخزون</Link>
-                    <Link href="/inventory/transfers" class="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold hover:border-emerald-300/60">تحويل المخزون</Link>
-                    <Link href="/inventory/counts" class="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold hover:border-emerald-300/60">الجرد الفعلي</Link>
-                    <Link href="/dashboard" class="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold hover:border-emerald-300/60">لوحة التحكم</Link>
-                </nav>
-            </div>
-        </header>
-
         <div class="mx-auto max-w-7xl space-y-7 px-5 py-8 sm:py-10">
             <section class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                 <div>
@@ -102,6 +87,18 @@ function clearFilters() {
                     <p class="mt-3 text-2xl font-black tabular-nums" :class="Number(summary.potentialGrossProfit) >= 0 ? 'text-amber-100' : 'text-rose-300'">{{ formatMoney(summary.potentialGrossProfit) }}</p>
                     <p class="mt-2 text-xs text-slate-400">{{ summary.outOfStockCount }} صنف رصيده صفر أو أقل.</p>
                 </article>
+            </section>
+
+            <section class="rounded-2xl border border-blue-100 bg-white p-5 shadow-sm sm:p-6">
+                <div class="flex flex-wrap items-start justify-between gap-3"><div><p class="text-xs font-extrabold text-blue-700">قراءة المخزون</p><h2 class="mt-1 text-lg font-black text-slate-900">الأصناف الأعلى في قيمة التكلفة</h2><p class="mt-1 text-sm text-slate-500">مقارنة بين قيمة رصيد كل صنف بسعر الشراء، للأصناف الظاهرة حاليًا.</p></div><span class="rounded-xl bg-sky-50 px-3 py-2 text-xl">▦</span></div>
+                <div v-if="topValueProducts.some((product) => Number(product.stockCostValue ?? 0) > 0)" class="mt-5 space-y-4">
+                    <div v-for="product in topValueProducts" :key="product.id" class="grid grid-cols-[minmax(100px,180px)_1fr_auto] items-center gap-3">
+                        <span class="truncate text-sm font-semibold text-slate-700" :title="product.name">{{ product.name }}</span>
+                        <div class="h-3 overflow-hidden rounded-full bg-slate-100"><div class="h-full rounded-full bg-gradient-to-l from-blue-600 to-cyan-400 transition-all duration-500" :style="{ width: `${Math.max(2, Number(product.stockCostValue ?? 0) / stockCostChartMax * 100)}%` }"></div></div>
+                        <span class="text-xs font-bold tabular-nums text-slate-700">{{ formatMoney(product.stockCostValue) }}</span>
+                    </div>
+                </div>
+                <p v-else class="mt-5 rounded-xl bg-slate-50 px-4 py-5 text-center text-sm text-slate-500">لا توجد أرصدة موجبة في الصفحة الحالية لعرض مقارنة مرئية.</p>
             </section>
 
             <section class="rounded-2xl border border-white/10 bg-slate-900 p-5 sm:p-6">

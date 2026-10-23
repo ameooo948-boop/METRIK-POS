@@ -10,6 +10,8 @@ use App\Services\Reports\SalesReport;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 use Inertia\Inertia;
 use Inertia\Response as InertiaResponse;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 
 class ReportController extends Controller
 {
@@ -19,7 +21,6 @@ class ReportController extends Controller
         $organization = $request->attributes->get('currentOrganization');
         $branches = collect($request->attributes->get('accessibleBranches', []));
         $branchIds = $this->selectedBranchIds((string) $request->validated('branch_id'), $branches->pluck('id')->map(static fn ($id): int => (int) $id)->all());
-        abort_if($branchIds === [], 404);
 
         $report = $salesReport->handle(
             (int) $organization->getKey(),
@@ -28,22 +29,18 @@ class ReportController extends Controller
             (string) $request->validated('to_date'),
         );
 
-        return Inertia::render('Reports/Index', [
-            'organization' => $organization->only(['id', 'name', 'currency']),
-            'branches' => $branches->map(static fn ($branch): array => [
-                'id' => (int) $branch->getKey(), 'name' => $branch->name, 'code' => $branch->code,
-            ])->values(),
-            'filters' => [
-                'fromDate' => (string) $request->validated('from_date'),
-                'toDate' => (string) $request->validated('to_date'),
-                'branchId' => (string) $request->validated('branch_id'),
-            ],
-            'selectedBranchLabel' => (string) $request->validated('branch_id') === 'all'
-                ? 'كل الفروع المتاحة'
-                : ($branches->firstWhere('id', (int) $request->validated('branch_id'))?->name ?? 'الفرع الحالي'),
-            ...$report,
-            'canManageExpenses' => $request->user()->can('manageExpenses', $organization),
-            'reportExports' => ReportExport::query()
+        // The report page must remain usable if a deployment has not yet applied
+        // the queued-export migration. The queue section is disabled in that case.
+        $reportExportQueueAvailable = Schema::hasTable('report_exports');
+        if (! $reportExportQueueAvailable) {
+            Log::warning('Report export queue table is missing; showing sales report without export history.', [
+                'organization_id' => (int) $organization->getKey(),
+                'user_id' => (int) $request->user()->getKey(),
+            ]);
+        }
+
+        $reportExports = $reportExportQueueAvailable
+            ? ReportExport::query()
                 ->forOrganization((int) $organization->getKey())
                 ->where('requested_by', $request->user()->getKey())
                 ->latest('id')
@@ -60,7 +57,28 @@ class ReportController extends Controller
                     'downloadUrl' => $export->status === 'completed'
                         ? route('reports.exports.download', $export)
                         : null,
-                ])->values()->all(),
+                ])->values()->all()
+            : [];
+
+        return Inertia::render('Reports/Index', [
+            'organization' => $organization->only(['id', 'name', 'currency']),
+            'branches' => $branches->map(static fn ($branch): array => [
+                'id' => (int) $branch->getKey(), 'name' => $branch->name, 'code' => $branch->code,
+            ])->values(),
+            'filters' => [
+                'fromDate' => (string) $request->validated('from_date'),
+                'toDate' => (string) $request->validated('to_date'),
+                'branchId' => (string) $request->validated('branch_id'),
+            ],
+            'selectedBranchLabel' => $branches->isEmpty()
+                ? 'لا توجد فروع متاحة'
+                : ((string) $request->validated('branch_id') === 'all'
+                    ? 'كل الفروع المتاحة'
+                    : ($branches->firstWhere('id', (int) $request->validated('branch_id'))?->name ?? 'الفرع الحالي')),
+            ...$report,
+            'canManageExpenses' => $request->user()->can('manageExpenses', $organization),
+            'reportExports' => $reportExports,
+            'reportExportQueueAvailable' => $reportExportQueueAvailable,
             'flashMessage' => $request->session()->get('success'),
         ]);
     }
@@ -86,10 +104,10 @@ class ReportController extends Controller
 
             // UTF-8 BOM improves Arabic CSV compatibility with Microsoft Excel.
             fwrite($stream, "\xEF\xBB\xBF");
-            fputcsv($stream, ['التاريخ', 'عدد الفواتير', 'المبيعات قبل المرتجعات', 'المرتجعات', 'صافي المبيعات شامل الضريبة', 'صافي ضريبة المبيعات', 'تكلفة البضاعة بعد المرتجعات المعادة للمخزون', 'مجمل الربح التقديري قبل الضريبة', 'المصروفات', 'صافي التشغيل التقديري قبل الضريبة']);
+            fputcsv($stream, ['التاريخ', 'عدد الفواتير', 'المبيعات قبل المرتجعات', 'المرتجعات', 'صافي المبيعات', 'تكلفة البضاعة بعد المرتجعات المعادة للمخزون', 'مجمل الربح التقديري', 'المصروفات', 'صافي التشغيل التقديري']);
             foreach ($report['daily'] as $row) {
                 fputcsv($stream, [
-                    $row['date'], $row['invoices'], $row['sales'], $row['returns'], $row['netSales'], $row['taxCollected'] ?? '0.00', $row['costOfGoods'],
+                    $row['date'], $row['invoices'], $row['sales'], $row['returns'], $row['netSales'], $row['costOfGoods'],
                     $row['grossProfit'], $row['expenses'], $row['netProfit'],
                 ]);
             }

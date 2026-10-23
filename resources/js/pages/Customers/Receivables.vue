@@ -23,6 +23,13 @@ function money(value) {
 function date(value) {
     return new Date(`${value}T00:00:00`).toLocaleDateString('ar-EG');
 }
+const agingBuckets = computed(() => [
+    { label: '0–30 يوم', value: Number(props.summary.bucket0To30 ?? 0), color: 'from-blue-600 to-sky-400' },
+    { label: '31–60 يوم', value: Number(props.summary.bucket31To60 ?? 0), color: 'from-indigo-600 to-violet-400' },
+    { label: '61–90 يوم', value: Number(props.summary.bucket61To90 ?? 0), color: 'from-amber-500 to-orange-300' },
+    { label: 'أكثر من 90 يوم', value: Number(props.summary.bucketOver90 ?? 0), color: 'from-rose-600 to-pink-400' },
+]);
+const agingMax = computed(() => Math.max(1, ...agingBuckets.value.map((bucket) => bucket.value)));
 </script>
 
 <template>
@@ -84,6 +91,16 @@ function date(value) {
                     <div class="rounded-xl border border-white/5 bg-slate-950/70 p-4"><p class="text-xs text-slate-400">أكثر من 90 يوم</p><p class="mt-2 text-lg font-bold text-rose-200">{{ money(summary.bucketOver90) }}</p></div>
                 </div>
 
+                <div class="mt-5 rounded-2xl border border-blue-100 bg-white p-4 sm:p-5">
+                    <div class="mb-4"><p class="text-xs font-extrabold text-blue-700">مخطط أعمار المديونية</p><h3 class="mt-1 text-lg font-black text-slate-900">توزيع المبالغ حسب عمر الفاتورة</h3><p class="mt-1 text-sm text-slate-500">يعرض المبالغ من ملخص المديونيات الحالي دون تقدير قيم غير موجودة.</p></div>
+                    <div class="space-y-4">
+                        <div v-for="bucket in agingBuckets" :key="bucket.label" class="grid grid-cols-[105px_minmax(0,1fr)_auto] items-center gap-3 sm:grid-cols-[130px_minmax(0,1fr)_145px]">
+                            <span class="text-xs font-bold text-slate-600 sm:text-sm">{{ bucket.label }}</span>
+                            <div class="h-3 overflow-hidden rounded-full bg-slate-100"><div class="h-full rounded-full bg-gradient-to-l transition-all duration-500" :class="bucket.color" :style="{ width: `${Math.max(bucket.value > 0 ? 2 : 0, bucket.value / agingMax * 100)}%` }"></div></div>
+                            <span class="text-xs font-black tabular-nums text-slate-700 sm:text-sm">{{ money(bucket.value) }}</span>
+                        </div>
+                    </div>
+                </div>
                 <div v-if="!customers.data.length" class="mt-5 rounded-xl border border-dashed border-white/10 p-8 text-center text-slate-400">لا توجد مديونيات مطابقة للبحث.</div>
                 <div v-else class="mt-5 overflow-x-auto rounded-xl border border-white/5">
                     <table class="w-full min-w-[1180px] text-right text-sm">
