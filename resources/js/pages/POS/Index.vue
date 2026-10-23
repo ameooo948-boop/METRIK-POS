@@ -149,7 +149,12 @@ function changeCartUnit(line, nextUnitId) {
     line.quantity = rounded.toFixed(3);
 }
 function addToCart(product, requestedUnitId = null) {
-    if (!props.shift || Number(product.stock) <= 0) return;
+    // Cart preparation must not depend on a currently open shift. The shift is
+    // still mandatory at checkout, where the server validates the transaction.
+    if (Number(product.stock) <= 0) {
+        offlineStatusMessage.value = 'رصيد المنتج غير متاح للإضافة إلى السلة.';
+        return;
+    }
     const options = unitOptionsFor(product);
     const targetUnit = options.find((unit) => Number(unit.id) === Number(requestedUnitId ?? product.baseUnitId)) || options[0];
     const existing = cart.value.find((line) => Number(line.product.id) === Number(product.id));
@@ -173,6 +178,9 @@ function addToCart(product, requestedUnitId = null) {
         existing.quantity = nextQuantity.toFixed(3);
     } else {
         cart.value.push({ product, quantity: '1.000', unitId: Number(targetUnit.id) });
+    }
+    if (!props.shift) {
+        offlineStatusMessage.value = 'تمت إضافة المنتج إلى السلة. افتح الوردية قبل تأكيد البيع؛ لا يمكن تسجيل بيع دون وردية مفتوحة.';
     }
 }
 function roundPercentCents(amountCents, percent) {
@@ -328,9 +336,21 @@ async function refreshOutboxCounts() {
 
 async function restoreCartFromLocal() {
     const context = offlineContext.value;
-    if (!context.saleScopeKey) return;
-    const saved = await getOfflineCart(context.saleScopeKey);
-    const byId = new Map(cachedCatalog.value.map((product) => [Number(product.id), product]));
+    const cartKey = context.cartScopeKey || context.saleScopeKey;
+    if (!cartKey) return;
+
+    let saved = await getOfflineCart(cartKey);
+    // Migrate carts saved by older versions under the shift-specific key.
+    if (!saved.length && context.saleScopeKey && context.saleScopeKey !== cartKey) {
+        const legacyCart = await getOfflineCart(context.saleScopeKey);
+        if (legacyCart.length) {
+            saved = legacyCart;
+            await saveOfflineCart(cartKey, legacyCart);
+            await saveOfflineCart(context.saleScopeKey, []);
+        }
+    }
+
+    const byId = new Map([...products.value, ...cachedCatalog.value].map((product) => [Number(product.id), product]));
     isRestoringCart.value = true;
     cart.value = saved.map((line) => {
         const product = byId.get(Number(line.productId));
@@ -506,7 +526,10 @@ async function queueOfflineCheckout() {
     checkoutForm.customer_id = null;
     checkoutForm.items = [];
     checkoutForm.client_operation_uuid = createOperationUuid();
-    await saveOfflineCart(context.saleScopeKey, []);
+    await saveOfflineCart(context.cartScopeKey || context.saleScopeKey, []);
+    if (context.saleScopeKey && context.saleScopeKey !== context.cartScopeKey) {
+        await saveOfflineCart(context.saleScopeKey, []);
+    }
     await refreshOutboxCounts();
     await refreshCachedCatalog();
     offlineStatusMessage.value = `تم حفظ البيع محليًا (مرجع ${uuid.slice(0, 8)}). لم تصدر فاتورة مركزية بعد.`;
@@ -660,8 +683,9 @@ function handleOffline() {
 }
 
 watch(cart, (value) => {
-    if (isRestoringCart.value || !offlineContext.value.saleScopeKey) return;
-    saveOfflineCart(offlineContext.value.saleScopeKey, value.map((line) => ({
+    const cartKey = offlineContext.value.cartScopeKey || offlineContext.value.saleScopeKey;
+    if (isRestoringCart.value || !cartKey) return;
+    saveOfflineCart(cartKey, value.map((line) => ({
         productId: Number(line.product.id),
         quantity: String(line.quantity),
         unitId: Number(line.unitId ?? line.product.baseUnitId),
@@ -687,8 +711,11 @@ onMounted(async () => {
         await refreshCachedCatalog();
         await restoreCartFromLocal();
         await refreshOutboxCounts();
-        if (navigator.onLine) await syncOfflineWork();
-        else {
+        if (navigator.onLine) {
+            await syncOfflineWork();
+            await refreshCachedCatalog();
+            await restoreCartFromLocal();
+        } else {
             isOnline.value = false;
             serverReachable.value = false;
             offlineStatusMessage.value = 'غير متصل. ستستخدم النسخة المحلية من المنتجات، وأي بيع محفوظ سيبقى في قائمة المزامنة.';
@@ -778,7 +805,7 @@ onBeforeUnmount(() => {
                     <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                         <article v-for="product in products" :key="product.id" class="flex min-h-44 flex-col rounded-xl border border-white/10 bg-slate-950/70 p-4">
                             <div class="flex items-start justify-between gap-3"><div class="min-w-0"><h3 class="break-words font-bold">{{ product.name }}</h3><p class="mt-1 text-xs text-slate-500">{{ product.sku }} · الرصيد بوحدة {{ product.unitName }}</p></div><span class="rounded-lg bg-white/5 px-2 py-1 text-xs text-slate-300">{{ quantity(product.stock) }}</span></div>
-                            <div class="mt-auto pt-5"><p class="text-lg font-black text-emerald-200">{{ money(selectedUnitForProduct(product)?.sellingPrice ?? product.sellingPrice) }} <span class="text-xs font-medium">ج.م / {{ selectedUnitForProduct(product)?.unitName || product.unitName }}</span></p><button type="button" :disabled="!shift || Number(product.stock) <= 0" @click="addToCart(product, getMatchedUnitId(product))" class="mt-3 w-full rounded-lg bg-emerald-300 px-3 py-2.5 text-sm font-bold text-slate-950 disabled:cursor-not-allowed disabled:opacity-40">{{ Number(product.stock) <= 0 ? 'نفد المخزون' : 'إضافة للسلة' }}</button></div>
+                            <div class="mt-auto pt-5"><p class="text-lg font-black text-emerald-200">{{ money(selectedUnitForProduct(product)?.sellingPrice ?? product.sellingPrice) }} <span class="text-xs font-medium">ج.م / {{ selectedUnitForProduct(product)?.unitName || product.unitName }}</span></p><button type="button" :disabled="Number(product.stock) <= 0" @click="addToCart(product, getMatchedUnitId(product))" class="mt-3 w-full rounded-lg bg-emerald-300 px-3 py-2.5 text-sm font-bold text-slate-950 disabled:cursor-not-allowed disabled:opacity-40">{{ Number(product.stock) <= 0 ? 'نفد المخزون' : 'إضافة للسلة' }}</button></div>
                         </article>
                     </div>
                 </section>
@@ -816,7 +843,8 @@ onBeforeUnmount(() => {
                         </div>
                         <div><label for="payment-method" class="mb-2 block text-sm font-medium">طريقة الدفع</label><select id="payment-method" v-model="checkoutForm.payment_method" class="w-full rounded-xl border border-white/10 bg-slate-950 px-4 py-3 outline-none focus:border-emerald-300"><option value="cash">نقدي</option><option value="card">بطاقة</option><option value="mobile_wallet">محفظة إلكترونية</option><option value="other">أخرى</option><option value="credit">آجل على حساب العميل</option></select><p v-if="checkoutForm.errors.payment_method" class="mt-1 text-sm text-rose-300">{{ checkoutForm.errors.payment_method }}</p></div>
                         <div><label for="sale-notes" class="mb-2 block text-sm font-medium">ملاحظة (اختياري)</label><input id="sale-notes" v-model="checkoutForm.notes" maxlength="1000" class="w-full rounded-xl border border-white/10 bg-slate-950 px-4 py-3 outline-none focus:border-emerald-300" placeholder="ملاحظة داخلية" /></div>
-                        <button type="button" :disabled="!shift || !cart.length || checkoutForm.processing" @click="checkout" class="w-full rounded-xl bg-emerald-300 px-5 py-4 font-black text-slate-950 disabled:cursor-not-allowed disabled:opacity-40">{{ checkoutForm.processing ? 'جارٍ تسجيل البيع...' : (!isConnected ? `حفظ البيع محليًا · ${money(estimatedTotal)} ج.م` : `تأكيد البيع · ${money(estimatedTotal)} ج.م`) }}</button>
+                        <button type="button" :disabled="!shift || !cart.length || checkoutForm.processing" @click="checkout" class="w-full rounded-xl bg-emerald-300 px-5 py-4 font-black text-slate-950 disabled:cursor-not-allowed disabled:opacity-40">{{ checkoutForm.processing ? 'جارٍ تسجيل البيع...' : (!cart.length ? 'أضف منتجات للسلة' : (!shift ? 'افتح الوردية لإتمام البيع' : (!isConnected ? `حفظ البيع محليًا · ${money(estimatedTotal)} ج.م` : `تأكيد البيع · ${money(estimatedTotal)} ج.م`))) }}</button>
+                        <p v-if="!shift && cart.length" class="text-sm leading-6 text-amber-200" role="status">تم تجهيز السلة. افتح وردية أولًا لتأكيد البيع؛ عند انقطاع الإنترنت لا يمكن بدء وردية جديدة، لكن ستظل السلة محفوظة على هذا الجهاز.</p>
                         <p v-if="checkoutForm.payment_method === 'credit'" class="text-xs leading-5 text-amber-200">البيع الآجل يتطلب اختيار عميل نشط وحدًا ائتمانيًا كافيًا. البيع الآجل غير متاح عند انقطاع الإنترنت.</p><p class="text-xs leading-5 text-slate-500">السعر والمخزون والإجمالي يُعاد التحقق منهم على الخادم. دون اتصال، تُحفظ المبيعات النقدية في الجهاز فقط، ولا تصدر فاتورة مركزية إلا بعد المزامنة. قد تحتاج العملية مراجعة إذا تغير السعر أو لم يكفِ المخزون.</p>
                     </div>
                 </section>

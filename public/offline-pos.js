@@ -94,12 +94,31 @@
         renderQueue();
         return state.outbox;
     }
+    function cartStorageKey(context = state.context) {
+        if (!context) return null;
+        if (context.cartScopeKey) return String(context.cartScopeKey);
+        if (context.organizationId && context.branchId && context.cashierId) {
+            return `${Number(context.organizationId)}:${Number(context.branchId)}:${Number(context.cashierId)}`;
+        }
+        return context.saleScopeKey ? String(context.saleScopeKey) : null;
+    }
     async function saveCart() {
-        if (!state.context?.saleScopeKey) return;
-        await putMeta(`cart:${state.context.saleScopeKey}`, state.cart.map((line) => ({ productId: Number(line.product.id), quantity: String(line.quantity) })));
+        const key = cartStorageKey();
+        if (!key) return;
+        await putMeta(`cart:${key}`, state.cart.map((line) => ({ productId: Number(line.product.id), quantity: String(line.quantity) })));
     }
     async function restoreCart() {
-        const saved = state.context.saleScopeKey ? await getMeta(`cart:${state.context.saleScopeKey}`) : [];
+        const key = cartStorageKey();
+        let saved = key ? await getMeta(`cart:${key}`) : [];
+        // Compatibility: migrate a cart saved under a previous shift-specific key.
+        if ((!Array.isArray(saved) || saved.length === 0) && state.context.saleScopeKey && state.context.saleScopeKey !== key) {
+            const legacy = await getMeta(`cart:${state.context.saleScopeKey}`);
+            if (Array.isArray(legacy) && legacy.length) {
+                saved = legacy;
+                await putMeta(`cart:${key}`, legacy);
+                await putMeta(`cart:${state.context.saleScopeKey}`, []);
+            }
+        }
         state.cart = (Array.isArray(saved) ? saved : []).map((line) => {
             const product = state.products.find((item) => Number(item.id) === Number(line.productId));
             return product ? { product, quantity: String(line.quantity) } : null;
@@ -126,14 +145,17 @@
             const sku = document.createElement('div'); sku.className = 'muted'; sku.textContent = `${product.sku} · ${product.unitName || 'وحدة'}`;
             const price = document.createElement('strong'); price.style.color = 'var(--green)'; price.textContent = `${money(product.sellingPrice)} ج.م`;
             const stock = document.createElement('span'); stock.className = 'pill'; stock.textContent = `المتاح محليًا: ${quantity(product.stock)}`;
-            const button = document.createElement('button'); button.className = 'btn primary'; button.textContent = Number(product.stock) > 0 ? 'إضافة للسلة' : 'الكمية المحلية صفر'; button.disabled = Number(product.stock) <= 0 || !state.context?.shiftId;
+            const button = document.createElement('button'); button.className = 'btn primary'; button.textContent = Number(product.stock) > 0 ? 'إضافة للسلة' : 'الكمية المحلية صفر'; button.disabled = Number(product.stock) <= 0;
             button.addEventListener('click', () => addToCart(product));
             card.append(name, sku, price, stock, button);
             container.append(card);
         });
     }
     function addToCart(product) {
-        if (!state.context?.shiftId || Number(product.stock) <= 0) return;
+        if (Number(product.stock) <= 0) {
+            showMessage('الرصيد المحلي لهذا المنتج صفر؛ لا يمكن إضافته إلى السلة.', true);
+            return;
+        }
         const existing = state.cart.find((line) => Number(line.product.id) === Number(product.id));
         const used = existing ? Number(existing.quantity) : 0;
         if (used + 1 > Number(product.stock)) {
@@ -143,6 +165,9 @@
         if (existing) existing.quantity = (used + 1).toFixed(3);
         else state.cart.push({ product, quantity: '1.000' });
         renderCart(); saveCart().catch(showFatal);
+        if (!state.context?.shiftId) {
+            showMessage('تمت إضافة المنتج إلى السلة. اتصل بالإنترنت وافتح وردية قبل حفظ البيع محليًا.');
+        }
     }
     function renderCart() {
         const container = $('cart'); container.replaceChildren();
@@ -182,6 +207,9 @@
         $('tax').textContent = `${money(taxTotalCents / 100)} ج.م`;
         $('total').textContent = `${money((preTaxTotalCents + taxTotalCents) / 100)} ج.م`;
         $('save-sale').disabled = !state.context?.shiftId || state.cart.length === 0;
+        $('save-sale').textContent = !state.context?.shiftId
+            ? 'افتح وردية قبل حفظ البيع'
+            : 'حفظ البيع على الجهاز فقط';
     }
     function renderQueue() {
         const pending = state.outbox.filter((entry) => entry.status !== 'synced');
@@ -242,7 +270,11 @@
         const db = await dbPromise;
         const tx = db.transaction(['outbox', 'meta'], 'readwrite');
         tx.objectStore('outbox').add(entry);
-        tx.objectStore('meta').put({ key: `cart:${state.context.saleScopeKey}`, value: [], updatedAt: new Date().toISOString() });
+        const cartKey = cartStorageKey();
+        tx.objectStore('meta').put({ key: `cart:${cartKey}`, value: [], updatedAt: new Date().toISOString() });
+        if (state.context.saleScopeKey && state.context.saleScopeKey !== cartKey) {
+            tx.objectStore('meta').put({ key: `cart:${state.context.saleScopeKey}`, value: [], updatedAt: new Date().toISOString() });
+        }
         await transactionDone(tx);
         state.cart = [];
         renderCart();
@@ -267,7 +299,7 @@
             state.context = await getMeta('activeContext');
             if (!state.context) {
                 $('market').textContent = 'لا توجد بيانات فرع محفوظة على هذا الجهاز.';
-                $('shift-status').textContent = 'اتصل بالإنترنت، وسجّل الدخول، وافتح وردية من نقطة البيع قبل استخدام الوضع دون اتصال.';
+                $('shift-status').textContent = 'اتصل بالإنترنت وسجّل الدخول أولًا لمزامنة كتالوج الفرع وفتح وردية. لا يمكن إنشاء وردية جديدة دون اتصال.';
                 $('save-sale').disabled = true;
                 return;
             }

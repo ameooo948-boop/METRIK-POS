@@ -74,6 +74,9 @@ export function createOfflineContext(source) {
         currency: String(source?.currency || 'EGP'),
         taxRateBasisPoints: Math.max(0, Math.min(10000, Math.round(Number(source?.taxRateBasisPoints || 0)))),
         catalogScopeKey: `${organizationId}:${branchId}`,
+        // Keep a draft cart independently of the shift so users can prepare items
+        // before opening a shift and retain the cart when moving online/offline.
+        cartScopeKey: `${organizationId}:${branchId}:${cashierId}`,
         saleScopeKey: shiftId == null ? null : `${organizationId}:${branchId}:${cashierId}:${shiftId}`,
     };
 }
