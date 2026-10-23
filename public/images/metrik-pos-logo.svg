@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 100" role="img" aria-labelledby="title desc">
+  <title id="title">Metrik POS</title><desc id="desc">Metrik POS — إدارة أذكى لنشاطك</desc>
+  <defs>
+    <linearGradient id="blue" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1687ff"/><stop offset=".55" stop-color="#1765e8"/><stop offset="1" stop-color="#4338ca"/></linearGradient>
+    <linearGradient id="shine" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#83d3ff"/><stop offset="1" stop-color="#2573f5"/></linearGradient>
+  </defs>
+  <g transform="translate(2 5) scale(.88)">
+    <path fill="url(#blue)" d="M10 76V28c0-15 17-23 28-12l12 12 12-12c11-11 28-3 28 12v48c0 12-15 17-22 7V48L55 59a7 7 0 0 1-10 0L32 48v35C25 93 10 88 10 76Z"/>
+    <path fill="url(#shine)" d="M50 28 62 16c11-11 28-3 28 12v4L57 64a10 10 0 0 1-14 0L10 32v-4c0-15 17-23 28-12Z" opacity=".94"/>
+  </g>
+  <text x="112" y="52" font-family="Inter, Segoe UI, Tahoma, Arial, sans-serif" font-size="42" font-weight="800" letter-spacing="-1.5" fill="#10254b">Metrik</text>
+  <text x="245" y="52" font-family="Inter, Segoe UI, Tahoma, Arial, sans-serif" font-size="42" font-weight="800" letter-spacing="-1.5" fill="#1765e8">POS</text>
+  <text x="114" y="79" font-family="Tahoma, Segoe UI, Arial, sans-serif" font-size="15" font-weight="600" fill="#71829c">إدارة أذكى لنشاطك</text>
+</svg>

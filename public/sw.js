@@ -1,6 +1,6 @@
 /* Metrik POS PWA service worker. Never cache authenticated HTML or API responses. */
-const STATIC_CACHE = 'metrik-pos-static-v3';
-const ASSET_CACHE = 'metrik-pos-assets-v3';
+const STATIC_CACHE = 'metrik-pos-static-v4';
+const ASSET_CACHE = 'metrik-pos-assets-v4';
 const STATIC_FILES = [
     '/offline.html',
     '/offline-unavailable.html',
@@ -8,6 +8,9 @@ const STATIC_FILES = [
     '/manifest.webmanifest',
     '/icons/icon-192.png',
     '/icons/icon-512.png',
+    '/images/metrik-pos-logo.svg',
+    '/images/metrik-pos-logo-light.svg',
+    '/images/metrik-pos-mark.svg',
 ];
 
 self.addEventListener('install', (event) => {

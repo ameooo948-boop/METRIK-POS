@@ -145,8 +145,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
                     <span class="metrik-menu-glyph">☰</span>
                 </button>
                 <Link href="/dashboard" class="metrik-brand-link" @click="closeMobile">
-                    <span class="metrik-logo">M</span>
-                    <span class="metrik-brand-copy"><strong>METRIK <em>POS</em></strong><small>إدارة أذكى لنشاطك</small></span>
+                    <img :src="'/images/metrik-pos-logo.svg'" alt="Metrik POS — الرئيسية" class="block h-10 w-[156px] object-contain object-right sm:w-[178px]">
                 </Link>
                 <button class="metrik-icon-button metrik-collapse-button" type="button" :aria-label="collapsed ? 'توسيع القائمة' : 'تصغير القائمة'" @click="collapsed = !collapsed"><span>{{ collapsed ? '⇤' : '⇥' }}</span></button>
             </div>
@@ -213,3 +212,108 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
         </div>
     </div>
 </template>
+
+
+<style scoped>
+:global(html),
+:global(body),
+:global(#app) {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: clip;
+}
+.metrik-shell {
+    width: 100%;
+    max-width: 100vw;
+    min-width: 0;
+    overflow-x: clip;
+    box-sizing: border-box;
+}
+.metrik-topbar {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+}
+.metrik-brand,
+.metrik-brand-link,
+.metrik-topbar-center,
+.metrik-topbar-actions {
+    min-width: 0;
+}
+.metrik-topbar-actions {
+    flex-shrink: 1;
+}
+.metrik-main-area {
+    width: calc(100% - 278px);
+    max-width: calc(100% - 278px);
+    min-width: 0;
+    margin-right: 278px;
+    box-sizing: border-box;
+}
+.metrik-main-area.sidebar-collapsed {
+    width: calc(100% - 82px);
+    max-width: calc(100% - 82px);
+    margin-right: 82px;
+}
+.metrik-quick-panel,
+.metrik-quick-heading,
+.metrik-quick-grid,
+.metrik-quick-link,
+.metrik-shell__content,
+.metrik-shell__content > * {
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+.metrik-quick-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.metrik-quick-copy {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+:deep(.metrik-shell__content > main),
+:deep(.metrik-shell__content > section),
+:deep(.metrik-shell__content > div) {
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+:deep(.metrik-shell__content img),
+:deep(.metrik-shell__content svg),
+:deep(.metrik-shell__content canvas) {
+    max-width: 100%;
+}
+:deep(.metrik-shell__content table) {
+    width: 100%;
+    max-width: 100%;
+}
+@media (max-width: 1279px) {
+    .metrik-main-area {
+        width: calc(100% - 278px);
+        max-width: calc(100% - 278px);
+    }
+}
+@media (max-width: 1023px) {
+    .metrik-main-area,
+    .metrik-main-area.sidebar-collapsed {
+        width: 100%;
+        max-width: 100%;
+        margin-right: 0;
+    }
+}
+@media (max-width: 680px) {
+    .metrik-topbar {
+        overflow: hidden;
+    }
+    .metrik-main-area,
+    .metrik-main-area.sidebar-collapsed {
+        width: 100%;
+        max-width: 100%;
+    }
+    .metrik-quick-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+</style>

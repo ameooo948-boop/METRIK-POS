@@ -5,6 +5,7 @@ namespace App\Http\Middleware;
 use App\Enums\OrganizationRole;
 use Closure;
 use Illuminate\Http\Request;
+use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Symfony\Component\HttpFoundation\Response;
 
 class ResolveOrganizationContext
@@ -15,6 +16,12 @@ class ResolveOrganizationContext
 
         if (! $user) {
             return redirect()->route('login');
+        }
+
+        // Check verification before organization resolution so an unverified account
+        // is not incorrectly redirected to organization setup first.
+        if ($user instanceof MustVerifyEmail && ! $user->hasVerifiedEmail()) {
+            return redirect()->guest(route('verification.notice'));
         }
 
         $organizations = $user->organizations()

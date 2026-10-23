@@ -18,15 +18,32 @@ class RegisteredUserController extends Controller
         ProvisionOrganizationForUser $provisioner,
     ): RedirectResponse {
         $data = $request->validated();
+        $accountType = $data['account_type'];
+
+        if ($accountType === 'employee') {
+            $user = DB::transaction(fn (): User => User::query()->create([
+                'name' => $data['name'],
+                'email' => $data['email'],
+                'password' => $data['password'],
+                'registration_type' => 'employee',
+            ]));
+
+            event(new Registered($user));
+
+            return redirect()
+                ->route('login')
+                ->with('status', 'تم إنشاء حساب الموظف. اطلب من مالك أو مدير المؤسسة إضافة بريدك الإلكتروني من صفحة أعضاء الفريق، ثم سجّل الدخول.');
+        }
 
         [$user, $organization] = DB::transaction(function () use ($data, $provisioner): array {
             $user = User::query()->create([
                 'name' => $data['name'],
                 'email' => $data['email'],
                 'password' => $data['password'],
+                'registration_type' => 'owner',
             ]);
 
-            $organization = $provisioner->handle($user, $data['organization_name']);
+            $organization = $provisioner->handle($user, (string) $data['organization_name']);
 
             return [$user, $organization];
         });

@@ -7,7 +7,9 @@
     <meta name="theme-color" content="#f4f7fb">
     <meta name="description" content="Metrik POS — إدارة السوبر ماركت والمخزون ونقطة البيع">
     <link rel="manifest" href="{{ asset('manifest.webmanifest') }}">
-    <link rel="icon" type="image/png" sizes="192x192" href="{{ asset('icons/icon-192.png') }}">
+    <link rel="icon" type="image/x-icon" href="{{ asset('favicon.ico') }}">
+    <link rel="icon" type="image/svg+xml" href="{{ asset('images/metrik-pos-mark.svg') }}">
+    <link rel="apple-touch-icon" sizes="192x192" href="{{ asset('icons/icon-192.png') }}">
     <title>Metrik POS</title>
     @vite(['resources/css/app.css', 'resources/js/app.js'])
     <x-inertia::head />

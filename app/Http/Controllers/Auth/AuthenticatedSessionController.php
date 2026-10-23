@@ -12,9 +12,11 @@ use Inertia\Response;
 
 class AuthenticatedSessionController extends Controller
 {
-    public function create(): Response
+    public function create(Request $request): Response
     {
-        return Inertia::render('Auth/Login', ['status' => session('status')]);
+        return Inertia::render('Auth/Login', [
+            'status' => $request->session()->get('status'),
+        ]);
     }
 
     public function store(LoginRequest $request): RedirectResponse

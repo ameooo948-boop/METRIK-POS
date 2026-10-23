@@ -18,6 +18,14 @@ class OrganizationSetupController extends Controller
             return redirect()->route('dashboard');
         }
 
+        if (($request->user()->registration_type ?? 'owner') === 'employee') {
+            return Inertia::render('Organizations/EmployeePending', [
+                'userName' => $request->user()->name,
+                'userEmail' => $request->user()->email,
+                'status' => $request->session()->get('status'),
+            ]);
+        }
+
         return Inertia::render('Organizations/Setup', [
             'userName' => $request->user()->name,
         ]);
@@ -27,6 +35,16 @@ class OrganizationSetupController extends Controller
         CreateOrganizationRequest $request,
         ProvisionOrganizationForUser $provisioner,
     ): RedirectResponse {
+        if (($request->user()->registration_type ?? 'owner') === 'employee') {
+            return redirect()
+                ->route('organization.setup')
+                ->with('status', 'حساب الموظف لا ينشئ مؤسسة جديدة. اطلب من مدير مؤسستك ربط حسابك من صفحة أعضاء الفريق.');
+        }
+
+        if ($request->user()->organizations()->exists()) {
+            return redirect()->route('dashboard');
+        }
+
         $organization = $provisioner->handle(
             $request->user(),
             $request->validated('organization_name'),
