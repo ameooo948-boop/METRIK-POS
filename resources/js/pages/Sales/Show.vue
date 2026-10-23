@@ -51,7 +51,7 @@ function submitReturn() {
                 </div>
             </div>
 
-            <article class="overflow-hidden rounded-2xl border border-white/10 bg-white text-slate-900 print:border-0 print:shadow-none">
+            <article class="sale-invoice-print overflow-hidden rounded-2xl border border-white/10 bg-white text-slate-900 print:border-0 print:shadow-none">
                 <header class="border-b border-slate-200 bg-slate-50 p-6 sm:p-8">
                     <div class="flex items-start justify-between gap-4">
                         <div><p class="text-lg font-black">METRIK <span class="text-emerald-600">POS</span></p><p class="mt-1 text-sm text-slate-500">{{ organization.name }}</p></div>
@@ -68,7 +68,7 @@ function submitReturn() {
                     <div class="overflow-x-auto">
                         <table class="w-full min-w-[500px] text-right text-sm">
                             <thead><tr class="border-b border-slate-200 text-slate-500"><th class="pb-3 font-medium">الصنف</th><th class="pb-3 font-medium">الكمية</th><th class="pb-3 font-medium">سعر الوحدة</th><th class="pb-3 text-left font-medium">الإجمالي</th></tr></thead>
-                            <tbody><tr v-for="item in sale.items" :key="item.id" class="border-b border-slate-100"><td class="py-4"><p class="font-semibold">{{ item.name }}</p><p class="mt-1 text-xs text-slate-500">{{ item.sku }}</p><p v-if="item.promotionName && Number(item.discountAmount) > 0" class="mt-1 text-xs text-emerald-700">{{ item.promotionName }} · خصم {{ money(item.discountAmount) }} ج.م</p><p v-else-if="Number(item.discountAmount) > 0" class="mt-1 text-xs text-emerald-700">خصم {{ money(item.discountAmount) }} ج.م</p><p v-if="Number(item.taxAmount) > 0" class="mt-1 text-xs text-sky-700">ضريبة البند: {{ money(item.taxAmount) }} ج.م</p></td><td class="py-4">{{ Number(item.quantity).toLocaleString('ar-EG', { maximumFractionDigits: 3 }) }} {{ item.unitName }}</td><td class="py-4">{{ money(item.unitPrice) }}</td><td class="py-4 text-left font-semibold">{{ money(item.lineTotal) }} ج.م</td></tr></tbody>
+                            <tbody><tr v-for="item in sale.items" :key="item.id" class="border-b border-slate-100"><td class="py-4"><p class="font-semibold">{{ item.name }}</p><p class="mt-1 text-xs text-slate-500">{{ item.sku }}</p><p v-if="item.promotionName && Number(item.discountAmount) > 0" class="mt-1 text-xs text-emerald-700">{{ item.promotionName }} · خصم {{ money(item.discountAmount) }} ج.م</p><p v-else-if="Number(item.discountAmount) > 0" class="mt-1 text-xs text-emerald-700">خصم {{ money(item.discountAmount) }} ج.م</p></td><td class="py-4">{{ Number(item.quantity).toLocaleString('ar-EG', { maximumFractionDigits: 3 }) }} {{ item.unitName }}</td><td class="py-4">{{ money(item.unitPrice) }}</td><td class="py-4 text-left font-semibold">{{ money(item.lineTotal) }} ج.م</td></tr></tbody>
                         </table>
                     </div>
                     <div class="mr-auto mt-6 max-w-sm space-y-3 text-sm">
@@ -108,8 +108,8 @@ function submitReturn() {
             <section v-if="sale.returns.length" class="rounded-2xl border border-white/10 bg-slate-900 p-5 sm:p-6">
                 <h2 class="text-xl font-black">سجل المرتجعات</h2>
                 <div v-for="saleReturn in sale.returns" :key="saleReturn.id" class="mt-4 rounded-xl border border-white/10 bg-slate-950/60 p-4">
-                    <div class="flex flex-wrap items-start justify-between gap-3"><div><p class="font-bold">{{ saleReturn.number }}</p><p class="mt-1 text-xs text-slate-400">{{ saleReturn.returnedAt }} · {{ saleReturn.reason }}</p></div><div class="text-left"><p class="font-black text-emerald-200">{{ money(saleReturn.total) }} ج.م</p><p v-if="Number(saleReturn.taxTotal) > 0" class="mt-1 text-xs text-sky-200">منها ضريبة مستردة {{ money(saleReturn.taxTotal) }} ج.م</p><p class="mt-1 text-xs text-slate-400">{{ paymentLabels[saleReturn.refundMethod] || saleReturn.refundMethod }}</p></div></div>
-                    <div class="mt-3 space-y-1 border-t border-white/5 pt-3 text-sm text-slate-300"><p v-for="(item, index) in saleReturn.items" :key="`${saleReturn.id}-${index}`">{{ item.name }} — {{ item.quantity }} × {{ money(item.total) }} ج.م<span v-if="Number(item.taxAmount) > 0"> · ضريبة مستردة {{ money(item.taxAmount) }} ج.م</span> <span class="text-xs text-slate-500">{{ item.restocked ? '· أعيد للمخزون' : '· لم يُعد للمخزون' }}</span></p></div>
+                    <div class="flex flex-wrap items-start justify-between gap-3"><div><p class="font-bold">{{ saleReturn.number }}</p><p class="mt-1 text-xs text-slate-400">{{ saleReturn.returnedAt }} · {{ saleReturn.reason }}</p></div><div class="text-left"><p class="font-black text-emerald-200">{{ money(saleReturn.total) }} ج.م</p><p class="mt-1 text-xs text-slate-400">{{ paymentLabels[saleReturn.refundMethod] || saleReturn.refundMethod }}</p></div></div>
+                    <div class="mt-3 space-y-1 border-t border-white/5 pt-3 text-sm text-slate-300"><p v-for="(item, index) in saleReturn.items" :key="`${saleReturn.id}-${index}`">{{ item.name }} — {{ item.quantity }} × {{ money(item.total) }} ج.م <span class="text-xs text-slate-500">{{ item.restocked ? '· أعيد للمخزون' : '· لم يُعد للمخزون' }}</span></p></div>
                 </div>
             </section>
         </section>
@@ -118,10 +118,81 @@ function submitReturn() {
 
 <style>
 @media print {
-    body { background: #fff !important; }
-    body * { visibility: hidden; }
-    article, article * { visibility: visible; }
-    article { position: absolute; inset: 0; width: 100%; }
-    button, a, form, section:not(article section) { display: none !important; }
+    @page { size: A4 portrait; margin: 10mm; }
+
+    html,
+    body {
+        width: auto !important;
+        min-width: 0 !important;
+        height: auto !important;
+        min-height: 0 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        overflow: visible !important;
+        background: #fff !important;
+        color: #111827 !important;
+        print-color-adjust: exact;
+        -webkit-print-color-adjust: exact;
+    }
+
+    /* Hide the app chrome without display:none on ancestors of the invoice. */
+    body * {
+        visibility: hidden !important;
+    }
+
+    .sale-invoice-print,
+    .sale-invoice-print * {
+        visibility: visible !important;
+    }
+
+    .sale-invoice-print {
+        position: absolute !important;
+        top: 0 !important;
+        right: 0 !important;
+        left: 0 !important;
+        width: 100% !important;
+        max-width: none !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        overflow: visible !important;
+        border: 0 !important;
+        border-radius: 0 !important;
+        box-shadow: none !important;
+        background: #fff !important;
+        color: #111827 !important;
+        break-inside: auto !important;
+        page-break-inside: auto !important;
+    }
+
+    .sale-invoice-print .overflow-x-auto {
+        overflow: visible !important;
+    }
+
+    .sale-invoice-print table {
+        width: 100% !important;
+        min-width: 0 !important;
+        table-layout: auto !important;
+        border-collapse: collapse !important;
+    }
+
+    .sale-invoice-print thead { display: table-header-group; }
+    .sale-invoice-print tfoot { display: table-footer-group; }
+    .sale-invoice-print tr,
+    .sale-invoice-print th,
+    .sale-invoice-print td {
+        break-inside: avoid !important;
+        page-break-inside: avoid !important;
+    }
+
+    .sale-invoice-print a {
+        color: inherit !important;
+        text-decoration: none !important;
+    }
+
+    .sale-invoice-print button,
+    .sale-invoice-print form,
+    .no-print {
+        display: none !important;
+    }
 }
 </style>
